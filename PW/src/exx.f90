@@ -3820,7 +3820,8 @@ end associate
     USE klist,              ONLY : nks, xk, ngk, igk_k
     USE uspp,               ONLY : nkb, vkb, okvan
     USE becmod,             ONLY : allocate_bec_type, deallocate_bec_type, &
-                                   bec_type, calbec
+                                   bec_type, calbec, &
+                                   allocate_bec_type_acc, deallocate_bec_type_acc ! NSCC
     USE lsda_mod,           ONLY : current_spin, lsda, isk
     USE io_files,           ONLY : nwordwfc, iunwfc
     USE buffers,            ONLY : get_buffer
@@ -3829,6 +3830,8 @@ end associate
     USE mp,                 ONLY : mp_sum
     USE wavefunctions,      ONLY : evc
     USE uspp_init,          ONLY : init_us_2
+    ! NSCC
+    USE control_flags,       ONLY : offload_type
     !
     IMPLICIT NONE
     !
@@ -3853,7 +3856,12 @@ end associate
 #if defined (__CUDA)
     IF (.NOT. ALLOCATED(xi_d)) ALLOCATE( xi_d(npwx*npol,nbndproj) )
 #endif
-    IF ( okvan ) CALL allocate_bec_type( nkb, nbnd, becpsi )
+    ! NSCC
+    IF (use_gpu) THEN
+       IF ( okvan ) CALL allocate_bec_type_acc( nkb, nbnd, becpsi )
+    ELSE
+       IF ( okvan ) CALL allocate_bec_type( nkb, nbnd, becpsi )
+    ENDIF
     !
     eexx = 0.0d0
     xi = (0.0d0,0.0d0)
@@ -3862,16 +3870,37 @@ end associate
        npw = ngk(ik)
        current_k = ik
        IF ( lsda ) current_spin = isk(ik)
-       IF ( nks > 1 ) CALL get_buffer( evc, nwordwfc, iunwfc, ik )
+       IF ( nks > 1 ) THEN
+          CALL get_buffer( evc, nwordwfc, iunwfc, ik )
+          !$acc update device(evc)
+       ENDIF
+
        IF ( okvan ) THEN
           CALL init_us_2( npw, igk_k(1,ik), xk(:,ik), vkb )
+          ! NSCC
+#if defined(__CUDA)
+          CALL calbec(offload_type, npw, vkb, evc, becpsi, nbnd )
+#elif
           CALL calbec( npw, vkb, evc, becpsi, nbnd )
+#endif
        ENDIF
-       IF (gamma_only) THEN
-          CALL aceinit_gamma( DoLoc, npw, nbnd, evc, xi(1,1,ik), becpsi, ee )
+       ! NSCC
+       IF (use_gpu) THEN
+         IF (gamma_only) THEN
+         ! To check first
+            CALL aceinit_gamma_gpu( DoLoc, npw, nbnd, evc, xi_d, becpsi, ee )
+         ELSE
+         ! To be implemented
+            !CALL aceinit_k_gpu( DoLoc, npw, nbnd, evc, xi_d, becpsi, ee )
+         ENDIF
+         xi(:,:,ik) = xi_d(:,:)
        ELSE
-          CALL aceinit_k( DoLoc, npw, nbnd, evc, xi(1,1,ik), becpsi, ee )
-       ENDIF
+         IF (gamma_only) THEN
+            CALL aceinit_gamma( DoLoc, npw, nbnd, evc, xi(1,1,ik), becpsi, ee )
+         ELSE
+            CALL aceinit_k( DoLoc, npw, nbnd, evc, xi(1,1,ik), becpsi, ee )
+         ENDIF
+      ENDIF
        eexx = eexx + ee
     ENDDO
     !
@@ -3883,7 +3912,11 @@ end associate
 #endif
     !
     IF (PRESENT(exex)) exex = eexx
-    IF ( okvan ) CALL deallocate_bec_type( becpsi )
+    IF (use_gpu) THEN
+       IF ( okvan ) CALL deallocate_bec_type_acc( becpsi )
+    ELSE
+       IF ( okvan ) CALL deallocate_bec_type( becpsi )
+    ENDIF
     !
     domat = .FALSE.
     !
@@ -3957,6 +3990,87 @@ end associate
     CALL stop_clock( 'aceinit' )  
     !
   END SUBROUTINE aceinit_gamma
+  !
+  !
+  !---------------------------------------------------------------------------------
+  SUBROUTINE aceinit_gamma_gpu( DoLoc, nnpw, nbnd, phi_d, xitmp_d, becpsi, exxe )
+    !-------------------------------------------------------------------------------
+    !! Compute xi(npw,nbndproj) for the ACE method.
+    !
+    USE becmod,         ONLY : bec_type
+    USE lsda_mod,       ONLY : current_spin
+    USE mp,             ONLY : mp_stop
+    !
+    IMPLICIT NONE
+    !
+    LOGICAL, INTENT(IN) :: DoLoc
+    !! if TRUE calculates exact exchange with SCDM orbitals
+    INTEGER :: nnpw
+    !! number of pw
+    INTEGER :: nbnd
+    !! number of bands
+    COMPLEX(DP) :: phi_d(nnpw,nbnd)
+    !! wavefunction
+    COMPLEX(DP), ALLOCATABLE :: xitmp(:,:)
+    COMPLEX(DP) :: xitmp_d(nnpw,nbndproj)
+    !! xi(npw,nbndproj)
+    TYPE(bec_type), INTENT(IN) :: becpsi
+    !! <beta|psi>
+    REAL(DP) :: exxe
+    !! exx energy
+    !
+    ! ... local variables
+    !
+    INTEGER :: nrxxs
+    REAL(DP), ALLOCATABLE :: mexx_d(:,:)
+    REAL(DP), PARAMETER :: Zero=0._DP
+    LOGICAL :: domat0  
+#if defined(__CUDA)
+    ATTRIBUTES(DEVICE) :: xitmp_d, mexx_d ! ? becpsi should be openacc
+#endif
+    !
+    CALL start_clock_gpu( 'aceinit' )  
+    !
+    nrxxs = dfftt%nnr * npol  
+    !
+    ALLOCATE( mexx_d(nbndproj,nbndproj) ) 
+    ALLOCATE( xitmp(nnpw,nbndproj) )
+    xitmp = (Zero,Zero)  
+    mexx_d = Zero  
+    !  
+    IF ( DoLoc ) then    
+      ! TODO for GPU. Placeholder for now
+      ! CALL vexx_loc_gpu( nnpw, nbndproj, xitmp_d, mexx_d )
+      ! CALL MatSymm_gpu( 'S', 'L', mexx_d, nbndproj )
+    ELSE  
+      ! |xi> = Vx[phi]|phi>
+      !$acc update host (phi_d)
+      CALL vexx( nnpw, nnpw, nbndproj, phi_d, xitmp, becpsi )
+      xitmp_d = xitmp
+      ! mexx = <phi|Vx[phi]|phi>
+      CALL matcalc_gpu( 'exact', .TRUE., 0, nnpw, nbndproj, nbndproj, phi_d, xitmp_d, mexx_d, exxe )
+      ! |xi> = -One * Vx[phi]|phi> * rmexx^T
+      ! phi_d: ok? acc copy from aceinit. 
+    ENDIF  
+    !
+    CALL aceupdate_gpu( nbndproj, nnpw, xitmp_d, mexx_d )
+    !
+    DEALLOCATE (xitmp)
+    DEALLOCATE( mexx_d )  
+    !
+    ! TODO.
+   !  IF ( local_thr > 0.0d0 ) THEN
+   !    domat0 = domat
+   !    domat = .TRUE.  
+   !    ! NSCC: possible sub vexxace_gamma_gpu?
+   !    CALL vexxace_gamma( nnpw, nbndproj, evc0(1,1,current_spin), exxe )  
+   !    evc0(:,:,current_spin) = phi(:,:)  
+   !    domat = domat0  
+   !  ENDIF
+    !
+    CALL stop_clock_gpu( 'aceinit' )  
+    !
+  END SUBROUTINE aceinit_gamma_gpu
   !
   !
   !----------------------------------------------------------------------------------
@@ -4168,6 +4282,67 @@ end associate
     DEALLOCATE( cmexx )
     !
     CALL stop_clock( 'aceupdate' )
+    !
+  END SUBROUTINE
+  !
+  !
+  !-------------------------------------------------------------------------------------------
+  SUBROUTINE aceupdate_gpu( nbndproj, nnpw, xitmp_d, rmexx_d )
+    !----------------------------------------------------------------------------------------
+    !! Build the ACE operator from the potential amd matrix (rmexx is assumed symmetric
+    !! and only the Lower Triangular part is considered).
+    !! NSCC GPU accelerated version. 
+    IMPLICIT NONE
+    !
+    INTEGER :: nbndproj
+    !! number of bands
+    INTEGER :: nnpw
+    !! number of PW
+    COMPLEX(DP) :: xitmp_d(nnpw,nbndproj)
+    !! xi(nnpw,nbndproj)
+    REAL(DP), ALLOCATABLE :: rmexx(:,:)
+    REAL(DP) :: rmexx_d(nbndproj,nbndproj)
+    !! |xi> = -One * Vx[phi]|phi> * rmexx^T
+#if defined(__CUDA)
+    ATTRIBUTES(DEVICE) :: xitmp_d, rmexx_d
+#endif
+    !
+    ! ... local variables
+    !
+    COMPLEX(DP), ALLOCATABLE :: cmexx(:,:), cmexx_d(:,:)
+#if defined(__CUDA)
+    ATTRIBUTES(DEVICE) :: cmexx_d
+#endif
+    REAL(DP), PARAMETER :: Zero=0._DP, One=1._DP
+    !
+    CALL start_clock_gpu( 'aceupdate_gpu' )
+    !
+    ! rmexx = -(Cholesky(rmexx))^-1
+    ! NSCC TODO: 
+    ! Not ideal to do DtoH and then HtoD assignment.. see if there is another way.
+    ALLOCATE(rmexx(nbndproj,nbndproj))
+    rmexx = -rmexx_d
+    rmexx_d = rmexx
+    ! CALL invchol( nbndproj, rmexx )
+    ! NSCC TODO: GPU?
+    CALL MatCholInv_gpu( 'L', nbndproj, rmexx_d )
+    !
+    ! |xi> = -One * Vx[phi]|phi> * rmexx^T
+    ALLOCATE( cmexx (nbndproj,nbndproj) )
+    ALLOCATE( cmexx_d(nbndproj,nbndproj) )
+    ! NSCC TODO: 
+    ! Not ideal to do DtoH and then HtoD assignment.. see if there is another way.
+    cmexx = (One,Zero)*rmexx_d
+    cmexx_d = cmexx
+    !
+    CALL MYZTRMM( 'R', 'L', 'C', 'N', nnpw, nbndproj, (One,Zero), cmexx_d, nbndproj, xitmp_d, nnpw)
+    !
+    DEALLOCATE( cmexx )
+    DEALLOCATE( rmexx )
+
+    DEALLOCATE( cmexx_d )
+    !
+    CALL stop_clock_gpu( 'aceupdate_gpu' )
     !
   END SUBROUTINE
   !

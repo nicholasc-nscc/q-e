@@ -128,3 +128,91 @@ SUBROUTINE matcalc_k_gpu (label, DoE, PrtMat, ik, ninner, n, m, U, V, mat, ee)
   CALL stop_clock_gpu('matcalc')
 
 END SUBROUTINE matcalc_k_gpu
+! NSCC
+!-----------------------------------------------------------------------------
+SUBROUTINE MatChol_gpu( n, A )
+  !--------------------------------------------------------------------------
+  !! Given a (real, positive definite) matrix A, returns the Cholesky factor
+  !! in A (only the Lower Triangular part of the input matrix is considered).
+  ! GPU version
+  USE kinds, ONLY : dp
+#if defined(__CUDA)
+  USE cudafor
+  !
+  USE cusolverdn
+#endif
+  !
+  IMPLICIT NONE
+  !
+  INTEGER, INTENT(IN) :: n
+  !! matrix dimension
+  REAL(DP), INTENT(INOUT):: A(n,n)
+  !! in/out matrix (real, positive definite)
+  !
+  INTEGER :: INFO
+  !
+  INFO = -1
+  CALL DPOTRF( 'L', n, A, n, INFO )
+  CALL errinfo( 'DPOTRF', 'Cholesky failed in MatChol.', INFO )
+  !
+END SUBROUTINE MatChol_gpu
+
+SUBROUTINE MatCholInv_gpu( MShape, n, A )
+  !--------------------------------------------------------------------------
+  !! Given a (real, positive definite) matrix A, returns the Cholesky factor
+  !! in A (only the Lower Triangular part of the input matrix is considered).
+  !!
+  !! Given a real square matrix A, returns its inverse in the same shape
+  !! as the input matrix, as indicated by MShape.
+
+  USE kinds, ONLY : dp
+  !
+  IMPLICIT NONE
+  !
+  INTEGER, INTENT(IN) :: n
+  !! matrix dimension
+  REAL(DP), INTENT(INOUT):: A(n,n)
+  !! the input-output matrix
+  CHARACTER(LEN=1) :: MShape
+  !! L: A is Lower Triangular (allocated in square shape);  
+  !! U: A is Upper Triangular (allocated in square shape);  
+  !! G: A is a general matrix.
+  !
+  ! ... local variables
+  !
+  INTEGER :: INFO, LWORK
+  INTEGER, ALLOCATABLE :: IPIV(:)
+  REAL(DP), ALLOCATABLE :: WORK(:)
+
+  ! MatChol
+  IF(MShape.eq.'L'.or.MShape.eq.'U') then 
+    INFO = -1
+    CALL MYDPOTRF( 'L', n, A, n, INFO )
+    CALL errinfo( 'MYDPOTRF', 'Cholesky failed in MatCholInv.', INFO )
+  ELSEIF(MShape.eq.'G') then
+    CALL errinfo( 'MYDPOTRF', 'Mshape not implemented in MatCholInv.', INFO )
+  ELSE
+    call errore('MatCholInv', 'Wrong MShape.', 1) 
+  END IF
+
+  ! MatInv
+  ! TODO
+  IF(MShape.eq.'L'.or.MShape.eq.'U') then 
+    INFO = -1
+    CALL MYDTRTRI( MShape, n, A, n, INFO )
+    CALL errinfo('MYDTRTRI','inversion failed in MatCholInv.',INFO)
+  ELSEIF(MShape.eq.'G') then 
+    ! LWORK = 3*n
+    ! ALLOCATE( IPIV(n), WORK(LWORK) ) 
+    ! INFO = -1
+    ! CALL MYDGETRF( n, n, A, n, IPIV, INFO )
+    ! CALL errinfo('MYDGETRF','LU decomposition failed in MatCholInv.',INFO)
+    ! INFO = -1
+    ! CALL MYDGETRI( n, A, n, IPIV, WORK, LWORK, INFO )
+    ! CALL errinfo('MYDGETRI','inversion failed in MatCholInv.',INFO)
+    ! DEALLOCATE( IPIV, WORK ) 
+  ELSE
+    call errore('MatCholInv', 'Wrong MShape.', 1) 
+  END IF 
+
+END SUBROUTINE MatCholInv_gpu
