@@ -167,8 +167,10 @@ SUBROUTINE MYDTRTRI( TRANS, M, A, N, INFO )
     DOUBLE PRECISION :: A (M,*)
 #if defined(__CUDA)
     INTEGER :: devinfo_d
-    INTEGER :: d_size
-    ! newer interface INTEGER(8), VALUE :: d_size, h_size
+    ! old interface 
+    !INTEGER :: d_size
+    ! newer interface 
+    INTEGER(8), VALUE :: d_size, h_size
     DOUBLE PRECISION, ALLOCATABLE :: work(:)
     DOUBLE PRECISION, ALLOCATABLE :: work_d(:)
     TYPE(cusolverDnHandle), SAVE :: cuSolverHandle
@@ -181,19 +183,21 @@ SUBROUTINE MYDTRTRI( TRANS, M, A, N, INFO )
     ENDIF
 
     IF (TRANS .eq. 'L') THEN
-      INFO = cusolverDnDtrtri_bufferSize (cuSolverHandle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
-                              M, A, N, d_size)
+      ! Old interface
+      ! INFO = cusolverDnDtrtri_bufferSize (cuSolverHandle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
+      !                         M, A, N, d_size)
       ! Newer interface
-      !INFO = cusolverDnXtrtri_bufferSize (cuSolverHandle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
-      !                        M, cudaDataType(CUDA_R_64F), A, N, d_size, h_size)
-      !ALLOCATE(work(h_size))
+      INFO = cusolverDnXtrtri_bufferSize (cuSolverHandle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
+                             M, cudaDataType(CUDA_R_64F), A, N, d_size, h_size)
+      ALLOCATE(work(h_size))
       ALLOCATE(work_d(d_size))
-      INFO = cusolverDnDtrtri(cuSolverHandle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
-                              M, A, N, work_d, d_size, devinfo_d)
+      ! Old interface
+      ! INFO = cusolverDnDtrtri(cuSolverHandle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
+      !                         M, A, N, work_d, d_size, devinfo_d)
       ! Newer interface
-      ! INFO = cusolverDnXtrtri(cuSolverHandle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
-      !                         M, cudaDataType(CUDA_R_64F), A, N, work_d, d_size, work, h_size, devinfo_d)
-      !DEALLOCATE(work)
+      INFO = cusolverDnXtrtri(cuSolverHandle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
+                              M, cudaDataType(CUDA_R_64F), A, N, work_d, d_size, work, h_size, devinfo_d)
+      DEALLOCATE(work)
       DEALLOCATE(work_d)
       INFO = cusolverDnDestroy(cuSolverHandle)
     ELSE
