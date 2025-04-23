@@ -113,11 +113,9 @@ MODULE exx_band
           ALLOCATE(evc_exx(npwx*npol,nbnd))
 #if defined(__CUDA)
           IF(use_gpu) istat = cudaHostRegister(C_LOC(evc_exx(1,1)), sizeof(evc_exx), cudaHostRegisterMapped)
-          !$acc enter data create(evc_exx)
 #endif
        END IF
        evc_exx = evc
-       !$acc update device (evc_exx)
        !
        ! get igk_exx
        !
@@ -171,7 +169,6 @@ MODULE exx_band
        ALLOCATE(evc_exx(lda*npol,max_ibands+2))
 #if defined(__CUDA)
        IF(use_gpu) istat = cudaHostRegister(C_LOC(evc_exx(1,1)), sizeof(evc_exx), cudaHostRegisterMapped)
-       !$acc enter data create(evc_exx)
 #endif
        !
        ! ... open files/buffer for wavefunctions (nwordwfc set in openfil)
@@ -191,10 +188,6 @@ MODULE exx_band
        ! transform evc to the EXX data structure
        !
        CALL transform_to_exx(lda, n, nbnd, nbnd, ik, evc, evc_exx, type)
-       ! For nks > 1, update device in get_buffer calls in exx.f90
-       IF ( nks .eq. 1 ) THEN
-       !$acc update device(evc_exx)
-       ENDIF
        !
        ! save evc to a buffer
        !
