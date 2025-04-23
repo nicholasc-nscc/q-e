@@ -1035,7 +1035,7 @@ MODULE exx
    !  ENDIF
 #endif
     IF (noncolin) THEN
-       ALLOCATE( temppsic_nc_d(nrxxs, npol) )
+       ALLOCATE( temppsic_nc_d(nrxxs, npol), psic_nc_d(nrxxs, npol) )
     ELSEIF ( .NOT. gamma_only ) THEN
        ALLOCATE( temppsic_d(nrxxs) )
     ENDIF
@@ -1326,7 +1326,7 @@ MODULE exx
                   !     CALL scatter_grid( dfftt, psic_all_nc_d(:,ipol), psic_nc_d(:,ipol) )
                   !  ENDDO
 ! #else
-                  !!$cuf kernel do(3)
+                  !$cuf kernel do(1)
                    DO ipol = 1, npol                
                       DO ir = 1, nxxs
                          psic_nc_d(ir,ipol) = (0._DP,0._DP)
