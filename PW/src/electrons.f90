@@ -34,7 +34,7 @@ SUBROUTINE electrons()
   USE wvfct,                ONLY : nbnd, wg, et
   USE klist,                ONLY : nks
   USE uspp,                 ONLY : okvan
-  USE exx,                  ONLY : aceinit,exxinit, exxenergy2, exxbuff, &
+  USE exx,                  ONLY : aceinit,exxinit, exxinit_gpu, exxenergy2, exxbuff, &
                                    fock0, fock1, fock2, fock3, dexx, use_ace, local_thr, &
                                    domat
   USE xc_lib,               ONLY : xclib_dft_is, exx_is_active, stop_exx
@@ -124,7 +124,11 @@ SUBROUTINE electrons()
 !civn  see non-scf comment about this
            Call stop_exx()
 !
-           CALL exxinit(DoLoc)
+           IF (use_gpu) THEN
+             CALL exxinit_gpu(DoLoc)
+           ELSE
+             CALL exxinit(DoLoc)
+           ENDIF
            IF( DoLoc.and.gamma_only) THEN
              CALL localize_orbitals( )
            ELSE IF (DoLoc) THEN
@@ -214,7 +218,11 @@ SUBROUTINE electrons()
         ! Activate exact exchange, set orbitals used in its calculation,
         ! then calculate exchange energy (will be useful at next step)
         !
-        CALL exxinit(DoLoc)
+        IF (use_gpu) THEN
+          CALL exxinit_gpu(DoLoc)
+        ELSE
+          CALL exxinit(DoLoc)
+        ENDIF
         IF( DoLoc.and.gamma_only) THEN
           CALL localize_orbitals( )
         ELSE IF (DoLoc) THEN
@@ -255,7 +263,11 @@ SUBROUTINE electrons()
         !
         ! Set new orbitals for the calculation of the exchange term
         !
-        CALL exxinit(DoLoc)
+        IF (use_gpu) THEN
+          CALL exxinit_gpu(DoLoc)
+        ELSE
+          CALL exxinit(DoLoc)
+        ENDIF
         IF( DoLoc.and.gamma_only) THEN
           CALL localize_orbitals( )
         ELSE IF (DoLoc) THEN
