@@ -1014,11 +1014,11 @@ MODULE exx
     nxxs = dfftt%nr1x * dfftt%nr2x * dfftt%nr3x
     nrxxs = dfftt%nnr
 #if defined(__MPI)
-    IF (noncolin) THEN
-       ALLOCATE( psic_all_nc_d(nxxs,npol), temppsic_all_nc_d(nxxs,npol) )
-    ELSEIF ( .NOT. gamma_only ) THEN
-       ALLOCATE( psic_all_d(nxxs), temppsic_all_d(nxxs) )
-    ENDIF
+   !  IF (noncolin) THEN
+   !     ALLOCATE( psic_all_nc_d(nxxs,npol), temppsic_all_nc_d(nxxs,npol) )
+   !  ELSEIF ( .NOT. gamma_only ) THEN
+   !     ALLOCATE( psic_all_d(nxxs), temppsic_all_d(nxxs) )
+   !  ENDIF
 #endif
     IF (noncolin) THEN
        ALLOCATE( temppsic_nc_d(nrxxs, npol) )
@@ -1288,30 +1288,30 @@ MODULE exx
                 isym = ABS(index_sym(ikq) )
                 !
                 IF (noncolin) THEN ! noncolinear
-#if defined(__MPI)
-                   DO ipol = 1, npol
-                      CALL gather_grid( dfftt, temppsic_nc_d(:,ipol), temppsic_all_nc_d(:,ipol) )
-                   ENDDO
-                   !
-                   IF ( me_egrp == 0 ) THEN
+! #if defined(__MPI)
+                  !  DO ipol = 1, npol
+                  !     CALL gather_grid( dfftt, temppsic_nc_d(:,ipol), temppsic_all_nc_d(:,ipol) )
+                  !  ENDDO
+                  !  !
+                  !  IF ( me_egrp == 0 ) THEN
                       
-                      DO ipol = 1, npol
-                         !$cuf kernel do(2)
-                         DO ir = 1, nxxs
-                            psic_all_nc_d(ir,ipol) = (0.0_DP, 0.0_DP)
-                            DO jpol = 1, npol
-                               psic_all_nc_d(ir,ipol) = psic_all_nc_d(ir,ipol) + &
-                                             CONJG(d_spin_d(jpol,ipol,isym)) * &
-                                             temppsic_all_nc_d(rir(ir,isym),jpol)
-                            ENDDO
-                         ENDDO
-                      ENDDO
-                   ENDIF
-                   !
-                   DO ipol = 1, npol
-                      CALL scatter_grid( dfftt, psic_all_nc_d(:,ipol), psic_nc_d(:,ipol) )
-                   ENDDO
-#else
+                  !     DO ipol = 1, npol
+                  !        !$cuf kernel do(2)
+                  !        DO ir = 1, nxxs
+                  !           psic_all_nc_d(ir,ipol) = (0.0_DP, 0.0_DP)
+                  !           DO jpol = 1, npol
+                  !              psic_all_nc_d(ir,ipol) = psic_all_nc_d(ir,ipol) + &
+                  !                            CONJG(d_spin_d(jpol,ipol,isym)) * &
+                  !                            temppsic_all_nc_d(rir(ir,isym),jpol)
+                  !           ENDDO
+                  !        ENDDO
+                  !     ENDDO
+                  !  ENDIF
+                  !  !
+                  !  DO ipol = 1, npol
+                  !     CALL scatter_grid( dfftt, psic_all_nc_d(:,ipol), psic_nc_d(:,ipol) )
+                  !  ENDDO
+! #else
                    DO ipol = 1, npol
                       !$cuf kernel do(2)                   
                       DO ir = 1, nxxs
@@ -1322,7 +1322,7 @@ MODULE exx
                          ENDDO
                       ENDDO
                    ENDDO
-#endif
+! #endif
                    !
 ! #if defined (__CUDA)
 !                    IF (use_gpu) CALL dev_buf%lock_buffer(psic_nc_d, (/nrxxs, npol/), ierr)
@@ -1349,21 +1349,21 @@ MODULE exx
 !                 IF (use_gpu) exxbuff = exxbuff_d
 ! #endif
                 ELSE ! noncolinear
-#if defined(__MPI)
-                   CALL gather_grid( dfftt, temppsic_d, temppsic_all_d )
-                   IF ( me_egrp == 0 ) THEN
-                      !$cuf kernel do 
-                      DO ir = 1, nxxs
-                         psic_all_d(ir) = temppsic_all_d(rir(ir,isym))
-                      ENDDO
-                   ENDIF
-                   CALL scatter_grid( dfftt, psic_all_d, psic_exx_d )
-#else
+! #if defined(__MPI)
+                  !  CALL gather_grid( dfftt, temppsic_d, temppsic_all_d )
+                  !  IF ( me_egrp == 0 ) THEN
+                  !     !$cuf kernel do 
+                  !     DO ir = 1, nxxs
+                  !        psic_all_d(ir) = temppsic_all_d(rir(ir,isym))
+                  !     ENDDO
+                  !  ENDIF
+                  !  CALL scatter_grid( dfftt, psic_all_d, psic_exx_d )
+! #else
                    !$cuf kernel do 
                    DO ir = 1, nrxxs
                       psic_exx_d(ir) = temppsic_d(rir(ir,isym))
                    ENDDO
-#endif
+! #endif
                    !$cuf kernel do 
                    DO ir = 1, nrxxs
                       IF (index_sym(ikq) < 0 ) THEN
@@ -1388,12 +1388,12 @@ MODULE exx
     IF (noncolin) THEN
        DEALLOCATE( temppsic_nc_d, psic_nc_d )
 #if defined(__MPI)
-       DEALLOCATE( temppsic_all_nc_d, psic_all_nc_d )
+      !  DEALLOCATE( temppsic_all_nc_d, psic_all_nc_d )
 #endif
     ELSE IF ( .NOT. gamma_only ) THEN
        DEALLOCATE( temppsic_d )
 #if defined(__MPI)
-       DEALLOCATE( temppsic_all_d, psic_all_d )
+      !  DEALLOCATE( temppsic_all_d, psic_all_d )
 #endif
     ENDIF
     !
