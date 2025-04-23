@@ -130,33 +130,6 @@ SUBROUTINE matcalc_k_gpu (label, DoE, PrtMat, ik, ninner, n, m, U, V, mat, ee)
 END SUBROUTINE matcalc_k_gpu
 ! NSCC
 !-----------------------------------------------------------------------------
-SUBROUTINE MatChol_gpu( n, A )
-  !--------------------------------------------------------------------------
-  !! Given a (real, positive definite) matrix A, returns the Cholesky factor
-  !! in A (only the Lower Triangular part of the input matrix is considered).
-  ! GPU version
-  USE kinds, ONLY : dp
-#if defined(__CUDA)
-  USE cudafor
-  !
-  USE cusolverdn
-#endif
-  !
-  IMPLICIT NONE
-  !
-  INTEGER, INTENT(IN) :: n
-  !! matrix dimension
-  REAL(DP), INTENT(INOUT):: A(n,n)
-  !! in/out matrix (real, positive definite)
-  !
-  INTEGER :: INFO
-  !
-  INFO = -1
-  CALL DPOTRF( 'L', n, A, n, INFO )
-  CALL errinfo( 'DPOTRF', 'Cholesky failed in MatChol.', INFO )
-  !
-END SUBROUTINE MatChol_gpu
-
 SUBROUTINE MatCholInv_gpu( MShape, n, A )
   !--------------------------------------------------------------------------
   !! Given a (real, positive definite) matrix A, returns the Cholesky factor
@@ -183,11 +156,15 @@ SUBROUTINE MatCholInv_gpu( MShape, n, A )
   INTEGER :: INFO, LWORK
   INTEGER, ALLOCATABLE :: IPIV(:)
   REAL(DP), ALLOCATABLE :: WORK(:)
+#if defined(__CUDA)
+  ATTRIBUTES(DEVICE) :: A
+#endif
+
 
   ! MatChol
   IF(MShape.eq.'L'.or.MShape.eq.'U') then 
     INFO = -1
-    CALL MYDPOTRF( 'L', n, A, n, INFO )
+    CALL MYDPOTRF( Mshape, n, A, n, INFO )
     CALL errinfo( 'MYDPOTRF', 'Cholesky failed in MatCholInv.', INFO )
   ELSEIF(MShape.eq.'G') then
     CALL errinfo( 'MYDPOTRF', 'Mshape not implemented in MatCholInv.', INFO )
@@ -196,12 +173,12 @@ SUBROUTINE MatCholInv_gpu( MShape, n, A )
   END IF
 
   ! MatInv
-  ! TODO
   IF(MShape.eq.'L'.or.MShape.eq.'U') then 
     INFO = -1
     CALL MYDTRTRI( MShape, n, A, n, INFO )
     CALL errinfo('MYDTRTRI','inversion failed in MatCholInv.',INFO)
   ELSEIF(MShape.eq.'G') then 
+    CALL errinfo( 'MYDGETRI', 'Mshape not implemented in MatCholInv.', INFO )
     ! LWORK = 3*n
     ! ALLOCATE( IPIV(n), WORK(LWORK) ) 
     ! INFO = -1
