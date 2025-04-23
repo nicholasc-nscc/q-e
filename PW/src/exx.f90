@@ -911,7 +911,8 @@ MODULE exx
                                      exx_set_symm, rir, working_pool, exxdiv, &
                                      erfc_scrlen, gau_scrlen, exx_divergence
     USE exx_band,             ONLY : change_data_structure, nwordwfc_exx, &
-                                     transform_evc_to_exx, igk_exx, evc_exx
+                                     transform_evc_to_exx, igk_exx, evc_exx, igk_exx_d
+    USE noncollin_module,     ONLY : nspin_lsda
 #if defined(__CUDA)
     USE device_memcpy_m,      ONLY : dev_memset
     USE device_fbuff_m,       ONLY : dev_buf
@@ -985,6 +986,10 @@ MODULE exx
     dfftt__nl=>dfftt%nl_d
     dfftt__nlm=>dfftt%nlm_d
 
+    ! local variables
+    INTEGER, ALLOCATABLE :: rir_d(:,:), index_sym_d(:)
+    attributes(DEVICE) :: rir_d, index_sym_d
+
     CALL start_clock_gpu ('exxinit')
     IF ( Doloc ) THEN
         WRITE(stdout,'(/,5X,"Using localization algorithm with threshold: ",&
@@ -1007,6 +1012,9 @@ MODULE exx
        ENDDO
        d_spin_d = d_spin
     ENDIF
+    !
+    ALLOCATE( rir_d(nxxs,nsym), source=rir )
+    ALLOCATE( index_sym_d(nspin_lsda*nkqs), source=index_sym )
     !
     CALL exx_fft_create()
     !
@@ -1177,6 +1185,7 @@ MODULE exx
        !
        IF ( nks > 1 ) CALL get_buffer( evc_exx, nwordwfc_exx, iunwfc_exx, ik )
        !$acc update device (evc_exx)
+       !$acc host_data use_device (evc_exx) 
        !
        ! ik         = index of k-point in this pool
        ! current_ik = index of k-point over all pools
@@ -1260,13 +1269,13 @@ MODULE exx
                 !
                 !$cuf kernel do(1)
                 DO ig = 1, npw
-                   temppsic_nc_d(dfftt__nl(igk_exx(ig,ik)),1) = evc_exx(ig,ibnd-iexx_start+1)
+                   temppsic_nc_d(dfftt__nl(igk_exx_d(ig,ik)),1) = evc_exx(ig,ibnd-iexx_start+1)
                 ENDDO
                 CALL invfft( 'Wave', temppsic_nc_d(:,1), dfftt )
                 !
                 !$cuf kernel do(1)
                 DO ig = 1, npw
-                   temppsic_nc_d(dfftt__nl(igk_exx(ig,ik)),2) = evc_exx(ig+npwx,ibnd-iexx_start+1)
+                   temppsic_nc_d(dfftt__nl(igk_exx_d(ig,ik)),2) = evc_exx(ig+npwx,ibnd-iexx_start+1)
                 ENDDO
                 CALL invfft( 'Wave', temppsic_nc_d(:,2), dfftt )
              ELSE
@@ -1277,7 +1286,7 @@ MODULE exx
                 !
                 !$cuf kernel do(1)
                 DO ig = 1, npw
-                   temppsic_d(dfftt__nl(igk_exx(ig,ik))) = evc_exx(ig,ibnd-iexx_start+1)
+                   temppsic_d(dfftt__nl(igk_exx_d(ig,ik))) = evc_exx(ig,ibnd-iexx_start+1)
                 ENDDO
                 CALL invfft( 'Wave', temppsic_d, dfftt )
              ENDIF
@@ -1312,13 +1321,13 @@ MODULE exx
                   !     CALL scatter_grid( dfftt, psic_all_nc_d(:,ipol), psic_nc_d(:,ipol) )
                   !  ENDDO
 ! #else
-                   DO ipol = 1, npol
-                      !$cuf kernel do(2)                   
+                  !$cuf kernel do(3)
+                   DO ipol = 1, npol                
                       DO ir = 1, nxxs
                          psic_nc_d(ir,ipol) = (0._DP,0._DP)
                          DO jpol = 1, npol
                             psic_nc_d(ir,ipol) = psic_nc_d(ir,ipol) + CONJG(d_spin_d(jpol,ipol,isym))* &
-                                               temppsic_nc_d(rir(ir,isym),jpol)
+                                               temppsic_nc_d(rir_d(ir,isym),jpol)
                          ENDDO
                       ENDDO
                    ENDDO
@@ -1361,12 +1370,12 @@ MODULE exx
 ! #else
                    !$cuf kernel do 
                    DO ir = 1, nrxxs
-                      psic_exx_d(ir) = temppsic_d(rir(ir,isym))
+                      psic_exx_d(ir) = temppsic_d(rir_d(ir,isym))
                    ENDDO
 ! #endif
                    !$cuf kernel do 
                    DO ir = 1, nrxxs
-                      IF (index_sym(ikq) < 0 ) THEN
+                      IF (index_sym_d(ikq) < 0 ) THEN
                          psic_exx_d(ir) = CONJG(psic_exx_d(ir))
                       ENDIF
                       exxbuff_d(ir,ibnd,ikq) = psic_exx_d(ir)
@@ -1381,6 +1390,7 @@ MODULE exx
           !
        ENDIF&
        IF_GAMMA_ONLY
+       !$acc end host_data
     ENDDO&
     KPOINTS_LOOP
     !
@@ -1421,6 +1431,9 @@ MODULE exx
     IF (okpaw) CALL PAW_init_fock_kernel()
     !
     CALL change_data_structure( .FALSE. )
+    !
+    DEALLOCATE( rir_d )
+    DEALLOCATE( index_sym_d )
     !
     CALL stop_clock_gpu( 'exxinit' )
     !
