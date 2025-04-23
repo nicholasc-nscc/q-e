@@ -979,6 +979,9 @@ MODULE exx
     INTEGER, ALLOCATABLE :: rir_d(:,:), index_sym_d(:)
     attributes(DEVICE) :: rir_d, index_sym_d
 
+    COMPLEX(DP), ALLOCATABLE :: evc_exx_d(:,:)
+    attributes(DEVICE) :: evc_exx_d
+
     !hack around PGI bug
     INTEGER, POINTER :: dfftt__nl(:)
     INTEGER, POINTER :: dfftt__nlm(:)
@@ -1187,7 +1190,7 @@ MODULE exx
     DO ik = 1, nks
        !
        IF ( nks > 1 ) CALL get_buffer( evc_exx, nwordwfc_exx, iunwfc_exx, ik )
-       !$acc enter data copyin(evc_exx) 
+       evc_exx_d = evc_exx
        !
        ! ik         = index of k-point in this pool
        ! current_ik = index of k-point over all pools
@@ -1212,24 +1215,24 @@ MODULE exx
                 IF ( ibnd == ibnd_loop_start .AND. MOD(iexx_start,2) == 0 ) THEN
                    !$cuf kernel do(1)
                    DO ig = 1, npwt
-                      psic_exx_d(dfftt__nl(ig))  = ( 0._DP, 1._DP )*evc_exx(ig,1)
-                      psic_exx_d(dfftt__nlm(ig)) = ( 0._DP, 1._DP )*CONJG(evc_exx(ig,1))
+                      psic_exx_d(dfftt__nl(ig))  = ( 0._DP, 1._DP )*evc_exx_d(ig,1)
+                      psic_exx_d(dfftt__nlm(ig)) = ( 0._DP, 1._DP )*CONJG(evc_exx_d(ig,1))
                    ENDDO
                    evc_offset = -1
                 ELSE
                    !$cuf kernel do(1)
                    DO ig = 1, npwt
-                      psic_exx_d(dfftt__nl(ig))  = evc_exx(ig,ibnd-ibnd_loop_start+evc_offset+1) &
-                           + ( 0._DP, 1._DP ) * evc_exx(ig,ibnd-ibnd_loop_start+evc_offset+2)
-                      psic_exx_d(dfftt__nlm(ig)) = CONJG( evc_exx(ig,ibnd-ibnd_loop_start+evc_offset+1) ) &
-                           + ( 0._DP, 1._DP ) * CONJG( evc_exx(ig,ibnd-ibnd_loop_start+evc_offset+2) )
+                      psic_exx_d(dfftt__nl(ig))  = evc_exx_d(ig,ibnd-ibnd_loop_start+evc_offset+1) &
+                           + ( 0._DP, 1._DP ) * evc_exx_d(ig,ibnd-ibnd_loop_start+evc_offset+2)
+                      psic_exx_d(dfftt__nlm(ig)) = CONJG( evc_exx_d(ig,ibnd-ibnd_loop_start+evc_offset+1) ) &
+                           + ( 0._DP, 1._DP ) * CONJG( evc_exx_d(ig,ibnd-ibnd_loop_start+evc_offset+2) )
                    ENDDO
                 ENDIF
              ELSE
                 !$cuf kernel do(1)
                 DO ig=1,npwt
-                   psic_exx_d(dfftt__nl (ig)) = evc_exx(ig,ibnd-ibnd_loop_start+evc_offset+1)
-                   psic_exx_d(dfftt__nlm(ig)) = CONJG( evc_exx(ig,ibnd-ibnd_loop_start+evc_offset+1) )
+                   psic_exx_d(dfftt__nl (ig)) = evc_exx_d(ig,ibnd-ibnd_loop_start+evc_offset+1)
+                   psic_exx_d(dfftt__nlm(ig)) = CONJG( evc_exx_d(ig,ibnd-ibnd_loop_start+evc_offset+1) )
                 ENDDO
              ENDIF
              !
@@ -1271,13 +1274,13 @@ MODULE exx
                 !
                 !$cuf kernel do(1)
                 DO ig = 1, npw
-                   temppsic_nc_d(dfftt__nl(igk_exx_d(ig,ik)),1) = evc_exx(ig,ibnd-iexx_start+1)
+                   temppsic_nc_d(dfftt__nl(igk_exx_d(ig,ik)),1) = evc_exx_d(ig,ibnd-iexx_start+1)
                 ENDDO
                 CALL invfft( 'Wave', temppsic_nc_d(:,1), dfftt )
                 !
                 !$cuf kernel do(1)
                 DO ig = 1, npw
-                   temppsic_nc_d(dfftt__nl(igk_exx_d(ig,ik)),2) = evc_exx(ig+npwx,ibnd-iexx_start+1)
+                   temppsic_nc_d(dfftt__nl(igk_exx_d(ig,ik)),2) = evc_exx_d(ig+npwx,ibnd-iexx_start+1)
                 ENDDO
                 CALL invfft( 'Wave', temppsic_nc_d(:,2), dfftt )
              ELSE
@@ -1288,7 +1291,7 @@ MODULE exx
                 !
                 !$cuf kernel do(1)
                 DO ig = 1, npw
-                   temppsic_d(dfftt__nl(igk_exx_d(ig,ik))) = evc_exx(ig,ibnd-iexx_start+1)
+                   temppsic_d(dfftt__nl(igk_exx_d(ig,ik))) = evc_exx_d(ig,ibnd-iexx_start+1)
                 ENDDO
                 CALL invfft( 'Wave', temppsic_d, dfftt )
              ENDIF
@@ -1392,7 +1395,6 @@ MODULE exx
           !
        ENDIF&
        IF_GAMMA_ONLY
-       !$acc exit data copyout(evc_exx) 
     ENDDO&
     KPOINTS_LOOP
     !
