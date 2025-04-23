@@ -132,21 +132,16 @@ SUBROUTINE MYDPOTRF( TRANS, M, A, N, INFO )
 #if defined(__CUDA)
     INTEGER :: lwork, devinfo_d
     DOUBLE PRECISION, ALLOCATABLE :: work_d(:)
-    TYPE(cusolverDnHandle), SAVE :: cuSolverHandle
-    LOGICAL, SAVE                :: cuSolverInitialized = .FALSE.
+    TYPE(cusolverDnHandle) :: handle
     attributes(device) :: A, devinfo_d, work_d
 
-    IF ( .NOT. cuSolverInitialized ) THEN
-      INFO = cusolverDnCreate(cuSolverHandle)
-      cuSolverInitialized = .TRUE.
-    ENDIF
-
     IF (TRANS .eq. 'L') THEN
-      INFO = cusolverDnDpotrf_bufferSize (cuSolverHandle, CUBLAS_FILL_MODE_LOWER, M, A, N, lwork)
+      INFO = cusolverDnCreate(handle)
+      INFO = cusolverDnDpotrf_bufferSize (handle, CUBLAS_FILL_MODE_LOWER, M, A, N, lwork)
       ALLOCATE(work_d(lwork), STAT = info)
-      INFO = cusolverDnDpotrf(cuSolverHandle, CUBLAS_FILL_MODE_LOWER, M, A, N, work_d, lwork, devinfo_d )
+      INFO = cusolverDnDpotrf(handle, CUBLAS_FILL_MODE_LOWER, M, A, N, work_d, lwork, devinfo_d )
       DEALLOCATE(work_d)
-      INFO = cusolverDnDestroy(cuSolverHandle)
+      INFO = cusolverDnDestroy(handle)
     ELSE
       stop 999 ! TODO
     ENDIF
@@ -173,33 +168,32 @@ SUBROUTINE MYDTRTRI( TRANS, M, A, N, INFO )
     INTEGER(8), VALUE :: d_size, h_size
     DOUBLE PRECISION, ALLOCATABLE :: work(:)
     DOUBLE PRECISION, ALLOCATABLE :: work_d(:)
-    TYPE(cusolverDnHandle), SAVE :: cuSolverHandle
-    LOGICAL, SAVE                :: cuSolverInitialized = .FALSE.
+    TYPE(cusolverDnHandle) :: handle
     attributes(device) :: A, devinfo_d, work_d
 
-    IF ( .NOT. cuSolverInitialized ) THEN
-      INFO = cusolverDnCreate(cuSolverHandle)
-      cuSolverInitialized = .TRUE.
-    ENDIF
-
     IF (TRANS .eq. 'L') THEN
+      INFO = cusolverDnCreate(handle)
+
       ! Old interface
-      ! INFO = cusolverDnDtrtri_bufferSize (cuSolverHandle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
+      ! INFO = cusolverDnDtrtri_bufferSize (handle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
       !                         M, A, N, d_size)
       ! Newer interface
-      INFO = cusolverDnXtrtri_bufferSize (cuSolverHandle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
+      INFO = cusolverDnXtrtri_bufferSize (handle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
                              M, cudaDataType(CUDA_R_64F), A, N, d_size, h_size)
+      !
       ALLOCATE(work(h_size))
       ALLOCATE(work_d(d_size))
+      !
       ! Old interface
-      ! INFO = cusolverDnDtrtri(cuSolverHandle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
+      ! INFO = cusolverDnDtrtri(handle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
       !                         M, A, N, work_d, d_size, devinfo_d)
       ! Newer interface
-      INFO = cusolverDnXtrtri(cuSolverHandle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
+      INFO = cusolverDnXtrtri(handle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
                               M, cudaDataType(CUDA_R_64F), A, N, work_d, d_size, work, h_size, devinfo_d)
+      !
       DEALLOCATE(work)
       DEALLOCATE(work_d)
-      INFO = cusolverDnDestroy(cuSolverHandle)
+      INFO = cusolverDnDestroy(handle)
     ELSE
       stop 999 ! TODO
     ENDIF
