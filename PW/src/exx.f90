@@ -1188,7 +1188,7 @@ MODULE exx
        !
        IF ( nks > 1 ) CALL get_buffer( evc_exx, nwordwfc_exx, iunwfc_exx, ik )
        !$acc update device (evc_exx)
-       !$acc host_data use_device (evc_exx) 
+       !$acc enter data present(evc_exx) 
        !
        ! ik         = index of k-point in this pool
        ! current_ik = index of k-point over all pools
@@ -1393,7 +1393,7 @@ MODULE exx
           !
        ENDIF&
        IF_GAMMA_ONLY
-       !$acc end host_data
+       !$acc exit data
     ENDDO&
     KPOINTS_LOOP
     !
