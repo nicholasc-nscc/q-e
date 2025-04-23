@@ -4048,7 +4048,9 @@ end associate
       CALL vexx( nnpw, nnpw, nbndproj, phi_d, xitmp, becpsi )
       xitmp_d = xitmp
       ! mexx = <phi|Vx[phi]|phi>
+      !$acc host_data use_device(phi_d)
       CALL matcalc_gpu( 'exact', .TRUE., 0, nnpw, nbndproj, nbndproj, phi_d, xitmp_d, mexx_d, exxe )
+      !$acc end host_data
       ! |xi> = -One * Vx[phi]|phi> * rmexx^T
       ! phi_d: ok? acc copy from aceinit. 
     ENDIF  
@@ -4300,7 +4302,6 @@ end associate
     !! number of PW
     COMPLEX(DP) :: xitmp_d(nnpw,nbndproj)
     !! xi(nnpw,nbndproj)
-    REAL(DP), ALLOCATABLE :: rmexx(:,:)
     REAL(DP) :: rmexx_d(nbndproj,nbndproj)
     !! |xi> = -One * Vx[phi]|phi> * rmexx^T
 #if defined(__CUDA)
@@ -4309,7 +4310,8 @@ end associate
     !
     ! ... local variables
     !
-    COMPLEX(DP), ALLOCATABLE :: cmexx(:,:), cmexx_d(:,:)
+    INTEGER :: i,j
+    COMPLEX(DP), ALLOCATABLE :: cmexx_d(:,:)
 #if defined(__CUDA)
     ATTRIBUTES(DEVICE) :: cmexx_d
 #endif
@@ -4318,28 +4320,27 @@ end associate
     CALL start_clock_gpu( 'aceupdate_gpu' )
     !
     ! rmexx = -(Cholesky(rmexx))^-1
-    ! NSCC TODO: 
-    ! Not ideal to do DtoH and then HtoD assignment.. see if there is another way.
-    ALLOCATE(rmexx(nbndproj,nbndproj))
-    rmexx = -rmexx_d
-    rmexx_d = rmexx
+    !$cuf kernel do(2)
+    do i=1,nbndproj
+       do j=1,nbndproj
+          rmexx_d(i,j) = -rmexx_d(i,j)
+       enddo
+    enddo
+
     ! CALL invchol( nbndproj, rmexx )
-    ! NSCC TODO: GPU?
     CALL MatCholInv_gpu( 'L', nbndproj, rmexx_d )
     !
     ! |xi> = -One * Vx[phi]|phi> * rmexx^T
-    ALLOCATE( cmexx (nbndproj,nbndproj) )
     ALLOCATE( cmexx_d(nbndproj,nbndproj) )
-    ! NSCC TODO: 
-    ! Not ideal to do DtoH and then HtoD assignment.. see if there is another way.
-    cmexx = (One,Zero)*rmexx_d
-    cmexx_d = cmexx
+    !$cuf kernel do(2)
+    do i=1,nbndproj
+       do j=1,nbndproj
+          cmexx_d(i,j) = (One,Zero)*rmexx_d(i,j)
+       enddo
+    enddo
     !
     CALL MYZTRMM( 'R', 'L', 'C', 'N', nnpw, nbndproj, (One,Zero), cmexx_d, nbndproj, xitmp_d, nnpw)
     !
-    DEALLOCATE( cmexx )
-    DEALLOCATE( rmexx )
-
     DEALLOCATE( cmexx_d )
     !
     CALL stop_clock_gpu( 'aceupdate_gpu' )
