@@ -99,7 +99,7 @@ MODULE exx_band
     IMPLICIT NONE
     !
     INTEGER, INTENT(IN) :: type
-    INTEGER :: lda, n, ik
+    INTEGER :: lda, n, ik, istat
     LOGICAL :: exst_mem, exst_file
     !
     IF (negrp == 1) THEN
@@ -111,9 +111,9 @@ MODULE exx_band
        !
        IF(.not.allocated(evc_exx))THEN
           ALLOCATE(evc_exx(npwx*npol,nbnd))
-#if defined(__CUDA)
-          IF(use_gpu) istat = cudaHostRegister(C_LOC(evc_exx(1,1)), sizeof(evc_exx), cudaHostRegisterMapped)
-#endif
+!#if defined(__CUDA)
+!          IF(use_gpu) istat = cudaHostRegister(C_LOC(evc_exx(1,1)), sizeof(evc_exx), cudaHostRegisterMapped)
+!#endif
        END IF
        evc_exx = evc
        !
