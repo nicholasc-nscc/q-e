@@ -974,6 +974,11 @@ MODULE exx
     INTEGER :: ibnd_start_new, ibnd_end_new, max_buff_bands_per_egrp
     INTEGER :: ibnd_exx, evc_offset
     !
+    !
+    ! local variables
+    INTEGER, ALLOCATABLE :: rir_d(:,:), index_sym_d(:)
+    attributes(DEVICE) :: rir_d, index_sym_d
+
     !hack around PGI bug
     INTEGER, POINTER :: dfftt__nl(:)
     INTEGER, POINTER :: dfftt__nlm(:)
@@ -986,9 +991,7 @@ MODULE exx
     dfftt__nl=>dfftt%nl_d
     dfftt__nlm=>dfftt%nlm_d
 
-    ! local variables
-    INTEGER, ALLOCATABLE :: rir_d(:,:), index_sym_d(:)
-    attributes(DEVICE) :: rir_d, index_sym_d
+
 
     CALL start_clock_gpu ('exxinit')
     IF ( Doloc ) THEN
