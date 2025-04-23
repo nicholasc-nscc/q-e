@@ -49,9 +49,10 @@ MODULE exx
   !
   !! GPU duplicated data
   COMPLEX(DP), ALLOCATABLE :: exxbuff_d(:,:,:)
+  REAL(DP), ALLOCATABLE :: locbuff_d(:,:,:)
   REAL(DP), ALLOCATABLE :: x_occupation_d(:,:)
 #if defined(__CUDA)
-  attributes(DEVICE) :: x_occupation_d, exxbuff_d
+  attributes(DEVICE) :: x_occupation_d, exxbuff_d, locbuff_d
 #endif
   !
 #if defined(__USE_INTEL_HBM_DIRECTIVES)
@@ -313,6 +314,7 @@ MODULE exx
     IF ( ALLOCATED(exxbuff) )      DEALLOCATE( exxbuff )
     IF ( ALLOCATED(exxbuff_d) )    DEALLOCATE( exxbuff_d )
     IF ( ALLOCATED(locbuff) )      DEALLOCATE( locbuff )
+    IF ( ALLOCATED(locbuff_d) )    DEALLOCATE( locbuff_d )
     IF ( ALLOCATED(locmat) )       DEALLOCATE( locmat )
     IF ( ALLOCATED(exxmat) )       DEALLOCATE( exxmat )
     IF ( ALLOCATED(xi)   )         DEALLOCATE( xi   )
@@ -942,8 +944,8 @@ MODULE exx
 #endif
 !! NSCC
 #if defined(__CUDA)
-    COMPLEX(DP),ALLOCATABLE :: temppsic_nc_d(:,:)
-    attributes(DEVICE)      :: temppsic_nc_d
+    COMPLEX(DP),ALLOCATABLE :: temppsic_d(:), temppsic_nc_d(:,:)
+    attributes(DEVICE)      :: temppsic_d, temppsic_nc_d
 #endif
 
 #if defined(__CUDA)
@@ -1227,11 +1229,12 @@ MODULE exx
                 DO ig=1,nrxxs
                    locbuff_d(ig,ibnd-ibnd_loop_start+evc_offset+1,ik) = DBLE(  psic_exx_d(ig) )
                 ENDDO
-               IF (ibnd-ibnd_loop_start+evc_offset+2 <= nbnd) THEN &
+               IF (ibnd-ibnd_loop_start+evc_offset+2 <= nbnd) THEN 
                   !$cuf kernel do(1)
                   DO ig=1,nrxxs
                      locbuff_d(ig,ibnd-ibnd_loop_start+evc_offset+2,ik) = AIMAG( psic_exx_d(ig) )
                   ENDDO
+               ENDIF
              ELSE
                 !$cuf kernel do(1)
                 DO ig=1,nrxxs
