@@ -1019,14 +1019,14 @@ MODULE exx
        d_spin_d = d_spin
     ENDIF
     !
-    ALLOCATE( rir_d(nxxs,nsym), source=rir )
-    ALLOCATE( index_sym_d(nspin_lsda*nkqs), source=index_sym )
-    !
     CALL exx_fft_create()
     !
     ! Note that nxxs is not the same as nrxxs in parallel case
     nxxs = dfftt%nr1x * dfftt%nr2x * dfftt%nr3x
     nrxxs = dfftt%nnr
+    !
+    ALLOCATE( rir_d(nxxs,nsym), source=rir )
+    ALLOCATE( index_sym_d(nspin_lsda*nkqs), source=index_sym )
 #if defined(__MPI)
    !  IF (noncolin) THEN
    !     ALLOCATE( psic_all_nc_d(nxxs,npol), temppsic_all_nc_d(nxxs,npol) )
