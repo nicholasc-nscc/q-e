@@ -3900,6 +3900,9 @@ end associate
          ELSE
             CALL aceinit_k( DoLoc, npw, nbnd, evc, xi(1,1,ik), becpsi, ee )
          ENDIF
+#if defined (__CUDA)
+         IF (nks == 1) xi_d(:,:) = xi(:,:,1)
+#endif
       ENDIF
        eexx = eexx + ee
     ENDDO
@@ -3907,9 +3910,7 @@ end associate
     CALL mp_sum( eexx, inter_pool_comm )
     ! WRITE(stdout,'(/,5X,"ACE energy",f15.8)') eexx
     !
-#if defined (__CUDA)
-    IF (nks == 1) xi_d(:,:) = xi(:,:,1)
-#endif
+
     !
     IF (PRESENT(exex)) exex = eexx
     IF (use_gpu) THEN
@@ -4044,7 +4045,6 @@ end associate
       ! CALL MatSymm_gpu( 'S', 'L', mexx_d, nbndproj )
     ELSE  
       ! |xi> = Vx[phi]|phi>
-      !$acc update host (phi_d)
       CALL vexx( nnpw, nnpw, nbndproj, phi_d, xitmp, becpsi )
       xitmp_d = xitmp
       ! mexx = <phi|Vx[phi]|phi>
