@@ -1326,7 +1326,7 @@ MODULE exx
                   !     CALL scatter_grid( dfftt, psic_all_nc_d(:,ipol), psic_nc_d(:,ipol) )
                   !  ENDDO
 ! #else
-                  !$cuf kernel do(3)
+                  !!$cuf kernel do(3)
                    DO ipol = 1, npol                
                       DO ir = 1, nxxs
                          psic_nc_d(ir,ipol) = (0._DP,0._DP)
