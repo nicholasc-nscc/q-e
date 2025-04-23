@@ -91,6 +91,10 @@ MODULE exx_band
     USE control_flags,        ONLY : io_level
     USE buffers,              ONLY : open_buffer, get_buffer, save_buffer
     USE mp_exx,               ONLY : max_ibands, negrp
+#if defined(__CUDA)
+    USE, INTRINSIC :: iso_c_binding
+    USE cudafor
+#endif
     !
     IMPLICIT NONE
     !
@@ -107,8 +111,13 @@ MODULE exx_band
        !
        IF(.not.allocated(evc_exx))THEN
           ALLOCATE(evc_exx(npwx*npol,nbnd))
+#if defined(__CUDA)
+          IF(use_gpu) istat = cudaHostRegister(C_LOC(evc_exx(1,1)), sizeof(evc_exx), cudaHostRegisterMapped)
+          !$acc enter data create(evc_exx)
+#endif
        END IF
        evc_exx = evc
+       !$acc update device (evc_exx)
        !
        ! get igk_exx
        !
@@ -160,6 +169,10 @@ MODULE exx_band
     !
     IF(.not.allocated(evc_exx))THEN
        ALLOCATE(evc_exx(lda*npol,max_ibands+2))
+#if defined(__CUDA)
+       IF(use_gpu) istat = cudaHostRegister(C_LOC(evc_exx(1,1)), sizeof(evc_exx), cudaHostRegisterMapped)
+       !$acc enter data create(evc_exx)
+#endif
        !
        ! ... open files/buffer for wavefunctions (nwordwfc set in openfil)
        ! ... io_level > 1 : open file, otherwise: open buffer
@@ -178,6 +191,10 @@ MODULE exx_band
        ! transform evc to the EXX data structure
        !
        CALL transform_to_exx(lda, n, nbnd, nbnd, ik, evc, evc_exx, type)
+       ! For nks > 1, update device in get_buffer calls in exx.f90
+       IF ( nks .eq. 1 ) THEN
+       !$acc update device(evc_exx)
+       ENDIF
        !
        ! save evc to a buffer
        !
