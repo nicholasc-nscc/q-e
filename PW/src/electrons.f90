@@ -26,7 +26,7 @@ SUBROUTINE electrons()
   USE scf,                  ONLY : rho, rho_core, rhog_core, v, vltot, vrs, &
                                    kedtau, vnew
   USE control_flags,        ONLY : tr2, nexxiter, conv_elec, restart, lmd, &
-                                   do_makov_payne, sic
+                                   do_makov_payne, sic, use_gpu
   USE sic_mod,              ONLY : sic_energy, occ_f2fn, occ_fn2f, save_rhon, sic_first
   USE io_files,             ONLY : iunres, seqopn
   USE ldaU,                 ONLY : eth
