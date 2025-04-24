@@ -113,12 +113,8 @@ MODULE exx_band
        IF(.not.allocated(evc_exx))THEN
           ALLOCATE(evc_exx(npwx*npol,nbnd))
           ALLOCATE(evc_exx_d(npwx*npol,nbnd))
-!#if defined(__CUDA)
-!          IF(use_gpu) istat = cudaHostRegister(C_LOC(evc_exx(1,1)), sizeof(evc_exx), cudaHostRegisterMapped)
-!#endif
        END IF
        evc_exx = evc
-       evc_exx_d = evc
        !
        ! get igk_exx
        !
@@ -171,9 +167,6 @@ MODULE exx_band
     IF(.not.allocated(evc_exx))THEN
        ALLOCATE(evc_exx(lda*npol,max_ibands+2))
        ALLOCATE(evc_exx_d(lda*npol,max_ibands+2))
-! #if defined(__CUDA)
-!        IF(use_gpu) istat = cudaHostRegister(C_LOC(evc_exx(1,1)), sizeof(evc_exx), cudaHostRegisterMapped)
-! #endif
        !
        ! ... open files/buffer for wavefunctions (nwordwfc set in openfil)
        ! ... io_level > 1 : open file, otherwise: open buffer
