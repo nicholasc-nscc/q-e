@@ -1025,8 +1025,6 @@ MODULE exx
     nxxs = dfftt%nr1x * dfftt%nr2x * dfftt%nr3x
     nrxxs = dfftt%nnr
     !
-    ALLOCATE( rir_d(nxxs,nsym), source=rir )
-    ALLOCATE( index_sym_d(nspin_lsda*nkqs), source=index_sym )
 #if defined(__MPI)
    !  IF (noncolin) THEN
    !     ALLOCATE( psic_all_nc_d(nxxs,npol), temppsic_all_nc_d(nxxs,npol) )
@@ -1052,8 +1050,14 @@ MODULE exx
        CALL start_exx()
     ENDIF
     !
-    IF (.NOT. gamma_only) CALL exx_set_symm( dfftt%nr1,  dfftt%nr2,  dfftt%nr3, &
-                                             dfftt%nr1x, dfftt%nr2x, dfftt%nr3x )
+    IF (.NOT. gamma_only) THEN
+      CALL exx_set_symm( dfftt%nr1,  dfftt%nr2,  dfftt%nr3, &
+                                                dfftt%nr1x, dfftt%nr2x, dfftt%nr3x )
+      ALLOCATE( rir_d(nxxs,nsym) )
+      rir_d = rir
+      ALLOCATE( index_sym_d(nspin_lsda*nkqs) )
+      index_sym_d = index_sym
+    ENDIF                                             
     ! set occupations of wavefunctions used in the calculation of exchange term
     IF (.NOT. ALLOCATED(x_occupation)) ALLOCATE( x_occupation(nbnd,nkstot) )
     IF( .NOT. ALLOCATED(x_occupation_d) .and. use_gpu) &
@@ -1169,15 +1173,6 @@ MODULE exx
                                    (/ ibnd_buff_start, ibnd_buff_end /), ibnd_buff_start, &
                                    (/ 1,SIZE(exxbuff_d,3)/), 1)
 #endif
-       ELSE
-         !$cuf kernel do(3)
-         DO ikq = 1, SIZE(exxbuff,3) 
-            DO ibnd = ibnd_buff_start, ibnd_buff_end
-               DO ir = 1, nrxxs*npol
-                  exxbuff_d(ir,ibnd,ikq) = (0.0_DP,0.0_DP)
-               ENDDO
-            ENDDO
-         ENDDO
          ! the above loops will replaced with the following line soon
          !CALL threaded_memset(exxbuff, 0.0_DP, nrxxs*npol*SIZE(exxbuff,2)*nkqs*2)
        ENDIF
@@ -1436,8 +1431,10 @@ MODULE exx
     !
     CALL change_data_structure( .FALSE. )
     !
-    DEALLOCATE( rir_d )
-    DEALLOCATE( index_sym_d )
+    IF (.NOT. gamma_only) THEN
+      DEALLOCATE( rir_d )
+      DEALLOCATE( index_sym_d )
+    ENDIF
     !
     CALL stop_clock_gpu( 'exxinit' )
     !
@@ -1970,9 +1967,6 @@ MODULE exx
     dfftt__nl=>dfftt%nl_d
     dfftt__nlm=>dfftt%nlm_d
     ALLOCATE(psi_d, source=psi)
-    !
-    !initial copy of exxbuff
-    exxbuff_d = exxbuff
     !
     ialloc = nibands(my_egrp_id+1)
     !
@@ -2858,9 +2852,7 @@ MODULE exx
     ALLOCATE( hpsi_d, source=hpsi )
     ALLOCATE( facb_d(nrxxs) )
 
-    !initial copy of exxbuff
-    exxbuff_d = exxbuff
-    !
+
     IF (noncolin) THEN
        ALLOCATE( result_nc_d(nrxxs,npol,ialloc) )
 
@@ -3002,7 +2994,7 @@ MODULE exx
                 nblock=2048
                 nrt = (nrxxs+nblock-1)/nblock
                 !
-associate(rhoc=>rhoc_d, exxbuff=>exxbuff_d)
+associate(rhoc=>rhoc_d)
                 all_start_tmp=all_start(wegrp)
                 !$cuf kernel do (2)
                 DO jbnd=jstart, jend
@@ -3010,12 +3002,12 @@ associate(rhoc=>rhoc_d, exxbuff=>exxbuff_d)
 
                      IF (noncolin) THEN
                        rhoc(ir,jbnd-jstart+1) = &
-                       (conjg(exxbuff(ir,jbnd-all_start_tmp+iexx_start,ikq))*temppsic_nc_d(ir,1,ii) +&
-                       conjg(exxbuff(nrxxs+ir,jbnd-all_start_tmp+iexx_start,ikq))*temppsic_nc_d(ir,2,ii)) * omega_inv
+                       (conjg(exxbuff_d(ir,jbnd-all_start_tmp+iexx_start,ikq))*temppsic_nc_d(ir,1,ii) +&
+                       conjg(exxbuff_d(nrxxs+ir,jbnd-all_start_tmp+iexx_start,ikq))*temppsic_nc_d(ir,2,ii)) * omega_inv
                      ELSE
 
                        rhoc(ir,jbnd-jstart+1) = &
-                       conjg(exxbuff(ir,jbnd-all_start_tmp+iexx_start,ikq))*temppsic_d(ir,ii)* omega_inv
+                       conjg(exxbuff_d(ir,jbnd-all_start_tmp+iexx_start,ikq))*temppsic_d(ir,ii)* omega_inv
                      ENDIF
 
                    ENDDO
@@ -3097,19 +3089,19 @@ end associate
                 !accumulates over bands and k points
                 !
 
-associate(exxbuff=>exxbuff_d, vc=>vc_d)
+associate(vc=>vc_d)
                 all_start_tmp=all_start(wegrp)
                 DO jbnd=jstart, jend
                    !$cuf kernel do (1)
                    DO ir = 1, nrxxs
                       IF (noncolin) THEN
                          result_nc_d(ir,1,ii) = result_nc_d(ir,1,ii) &
-                              + vc(ir,jbnd-jstart+1) * exxbuff(ir,jbnd-all_start_tmp+iexx_start,ikq)
+                              + vc(ir,jbnd-jstart+1) * exxbuff_d(ir,jbnd-all_start_tmp+iexx_start,ikq)
                          result_nc_d(ir,2,ii) = result_nc_d(ir,2,ii) &
-                              + vc(ir,jbnd-jstart+1) * exxbuff(ir+nrxxs,jbnd-all_start_tmp+iexx_start,ikq)
+                              + vc(ir,jbnd-jstart+1) * exxbuff_d(ir+nrxxs,jbnd-all_start_tmp+iexx_start,ikq)
                       ELSE
                          result_d(ir,ii) = result_d(ir,ii) &
-                              + vc(ir,jbnd-jstart+1)*exxbuff(ir,jbnd-all_start_tmp+iexx_start,ikq)
+                              + vc(ir,jbnd-jstart+1)*exxbuff_d(ir,jbnd-all_start_tmp+iexx_start,ikq)
                       ENDIF
                    ENDDO
                 ENDDO
@@ -3123,9 +3115,9 @@ end associate
           END DO !IJT
           !
           ! get the next nbnd/negrp data
+          ! NSCC untested
           IF (negrp>1) THEN
-             call mp_circular_shift_left( exxbuff(:,:,ikq), me_egrp, inter_egrp_comm )
-             exxbuff_d = exxbuff
+             call mp_circular_shift_left( exxbuff_d(:,:,ikq), me_egrp, inter_egrp_comm )
           ENDIF
           !
        END DO !iegrp
