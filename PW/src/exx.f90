@@ -911,7 +911,8 @@ MODULE exx
                                      exx_set_symm, rir, working_pool, exxdiv, &
                                      erfc_scrlen, gau_scrlen, exx_divergence
     USE exx_band,             ONLY : change_data_structure, nwordwfc_exx, &
-                                     transform_evc_to_exx, igk_exx, evc_exx, igk_exx_d
+                                     transform_evc_to_exx, igk_exx, evc_exx, igk_exx_d, &
+                                     evc_exx_d
     USE noncollin_module,     ONLY : nspin_lsda
 #if defined(__CUDA)
     USE device_memcpy_m,      ONLY : dev_memset
@@ -979,9 +980,6 @@ MODULE exx
     INTEGER, ALLOCATABLE :: rir_d(:,:), index_sym_d(:)
     attributes(DEVICE) :: rir_d, index_sym_d
 
-    COMPLEX(DP), ALLOCATABLE :: evc_exx_d(:,:)
-    attributes(DEVICE) :: evc_exx_d
-
     !hack around PGI bug
     INTEGER, POINTER :: dfftt__nl(:)
     INTEGER, POINTER :: dfftt__nlm(:)
@@ -991,10 +989,6 @@ MODULE exx
     attributes(DEVICE) :: dfftt__nlm    
 #endif
     !
-    dfftt__nl=>dfftt%nl_d
-    dfftt__nlm=>dfftt%nlm_d
-
-
 
     CALL start_clock_gpu ('exxinit')
     IF ( Doloc ) THEN
@@ -1020,6 +1014,8 @@ MODULE exx
     ENDIF
     !
     CALL exx_fft_create()
+    dfftt__nl=>dfftt%nl_d
+    dfftt__nlm=>dfftt%nlm_d
     !
     ! Note that nxxs is not the same as nrxxs in parallel case
     nxxs = dfftt%nr1x * dfftt%nr2x * dfftt%nr3x
@@ -1161,7 +1157,6 @@ MODULE exx
         ENDDO
       ENDIF
     ELSE
-       IF (use_gpu) THEN
 #if defined (__CUDA)
          ! NB: the array bounds are not passed to the subroutine.
          !
@@ -1173,9 +1168,6 @@ MODULE exx
                                    (/ ibnd_buff_start, ibnd_buff_end /), ibnd_buff_start, &
                                    (/ 1,SIZE(exxbuff_d,3)/), 1)
 #endif
-         ! the above loops will replaced with the following line soon
-         !CALL threaded_memset(exxbuff, 0.0_DP, nrxxs*npol*SIZE(exxbuff,2)*nkqs*2)
-       ENDIF
        !
     ENDIF
     !
