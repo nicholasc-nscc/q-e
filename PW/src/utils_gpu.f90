@@ -193,3 +193,132 @@ SUBROUTINE MatCholInv_gpu( MShape, n, A )
   END IF 
 
 END SUBROUTINE MatCholInv_gpu
+!---------------------------------------------------------------------------
+SUBROUTINE invchol_k_gpu( n, A )
+  !---------------------------------------------------------------------------
+  !! Given a matrix A, returns the inverse of the Cholesky decomposition of A
+  !! for Cholesky matrices.
+  !
+  USE kinds, ONLY : dp
+  !
+  IMPLICIT NONE
+  !
+  INTEGER, INTENT(IN) :: n
+  !! the matrix dimension
+  COMPLEX(dp), INTENT(IN):: A(n,n)
+  !! the input matrix
+#if defined(__CUDA)
+  ATTRIBUTES(DEVICE) :: A
+#endif
+  !
+  INTEGER :: INFO
+
+  INFO = -1
+  CALL MYZPOTRF( 'L', n, A, n, INFO )
+  CALL errinfo('ZPOTRF','Cholesky failed in invchol.',INFO)
+  INFO = -1
+  CALL MYZTRTRI( 'L', 'N', n, A, n, INFO )
+  CALL errinfo('ZTRTRI','inversion failed in invchol.',INFO)
+  Call MatSymm_k_gpu('L','L',A, n)
+
+END SUBROUTINE invchol_k_gpu
+!
+!----------------------------------------------------------------
+SUBROUTINE MatSymm_k_gpu( MShape, How, Mat, n )
+  !---------------------------------------------------------------
+  ! Symmetrize the (square) matrix Mat - complex output.
+  !
+  USE kinds, ONLY : dp
+  !
+  IMPLICIT NONE
+  !
+  CHARACTER(LEN=1) :: How
+  !! U: copying the upper block into the lower block;  
+  !! L: copying the lower block into the upper block;  
+  !! S: averaging
+  CHARACTER(LEN=1) :: MShape
+  !! U: return the Upper Triangular (Zeros in Lower);  
+  !! L: return the Lower Triangular (Zeros in Upper);  
+  !! S: return the Square symmetric matrix
+  INTEGER :: n
+  !! the matrix dimension
+  COMPLEX(DP) :: Mat(n,n)
+  !! input/output matrix
+  !
+  ! ... local variables
+  !
+  INTEGER :: i, j 
+  COMPLEX(DP), ALLOCATABLE :: MatT(:,:)
+  REAL(DP), PARAMETER :: Zero=0.0d0, Two=2.0d0
+#if defined(__CUDA)
+  ATTRIBUTES(DEVICE) :: Mat, MatT
+#endif
+  ALLOCATE( MatT(n,n) )
+ !TODO: I am here
+! Properly fill the lower triangular of MatT
+  MatT = (Zero,Zero) 
+  IF(How.eq.'L') then ! use lower
+    !$cuf kernel do(2)
+    do i = 1, n
+      MatT(i,i) = Mat(i,i)
+      do j = i+1, n 
+        MatT(j,i) = Mat(j,i)
+      end do        
+    end do        
+  ELSE IF( How.eq.'U' ) then ! use upper
+    !$cuf kernel do(2)
+    do i = 1, n
+      MatT(i,i) = Mat(i,i)
+      do j = i+1, n
+        MatT(j,i) = Mat(i,j)
+      end do        
+    end do        
+  ELSE IF( How.eq.'S' ) then ! use average 
+    !$cuf kernel do(2)
+    do i = 1, n
+      MatT(i,i) = Mat(i,i)
+      do j = i+1, n
+        MatT(j,i) = (Mat(i,j) + Mat(j,i))  / Two
+      end do        
+    end do        
+  ELSE
+    Call errore('MatSymm_k_gpu','Wrong How in MatSymm_k_gpu.',1)
+  END IF 
+
+! Properly copy the results in Mat
+  Mat = (Zero,Zero) 
+  IF(MShape.eq.'L') then ! return lower 
+    !$cuf kernel do(2)
+    do i = 1, n
+      do j = 1, n
+        Mat(i,j) = MatT(i,j)
+      enddo
+    end do
+  ELSE IF(MShape.eq.'U') then ! return upper 
+    !$cuf kernel do(2)
+    do i = 1, n
+      Mat(i,i) = MatT(i,i)
+      do j = i+1, n
+        Mat(i,j) = MatT(j,i)   
+      end do        
+    end do        
+  ELSE IF(MShape.eq.'S') then ! return square
+    !$cuf kernel do(2)
+    do i = 1, n
+      do j = 1, n
+        Mat(i,j) = MatT(i,j)
+      enddo
+    end do
+    !$cuf kernel do(2)  
+    do i = 1, n
+      do j = i+1, n
+        Mat(i,j) = MatT(j,i)   
+      end do        
+    end do        
+  ELSE
+    Call errore('MatSymm_k_gpu','Wrong MShape in MatSymm_k_gpu.',1)
+  END IF 
+
+  DEALLOCATE( MatT )
+
+END SUBROUTINE MatSymm_k_gpu
