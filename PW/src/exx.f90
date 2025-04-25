@@ -4446,7 +4446,7 @@ end associate
             CALL aceinit_gamma_gpu( DoLoc, npw, nbnd, evc, xi_d, becpsi, ee )
          ELSE
          ! To be implemented
-            !CALL aceinit_k_gpu( DoLoc, npw, nbnd, evc, xi_d, becpsi, ee )
+            CALL aceinit_k_gpu( DoLoc, npw, nbnd, evc, xi_d, becpsi, ee )
          ENDIF
          xi(:,:,ik) = xi_d(:,:)
        ELSE
@@ -4582,7 +4582,7 @@ end associate
     REAL(DP), PARAMETER :: Zero=0._DP
     LOGICAL :: domat0  
 #if defined(__CUDA)
-    ATTRIBUTES(DEVICE) :: xitmp_d, mexx_d ! ? becpsi should be openacc
+    ATTRIBUTES(DEVICE) :: xitmp_d, mexx_d
 #endif
     !
     CALL start_clock_gpu( 'aceinit' )  
@@ -4981,6 +4981,93 @@ end associate
   END SUBROUTINE aceinit_k
   !
   !
+  !---------------------------------------------------------------------------------------------
+  SUBROUTINE aceinit_k_gpu( DoLoc, nnpw, nbnd, phi_d, xitmp_d, becpsi, exxe )
+    !-----------------------------------------------------------------------------------------
+    !! Compute xi(npw,nbndproj) for the ACE method.
+    !
+    USE becmod,               ONLY : bec_type
+    USE wvfct,                ONLY : current_k, npwx
+    USE klist,                ONLY : wk
+    USE noncollin_module,     ONLY : npol
+    !
+    IMPLICIT NONE
+    !
+    LOGICAL, INTENT(IN) :: DoLoc
+    !! if TRUE calculates exact exchange with SCDM orbitals
+    INTEGER :: nnpw
+    !! number of PW
+    INTEGER :: nbnd
+    !! number of bands
+    COMPLEX(DP) :: phi_d(npwx*npol,nbnd)
+    !! wave function
+    COMPLEX(DP) :: xitmp_d(npwx*npol,nbndproj)
+    !! xi(nnpw,nbndproj)
+    TYPE(bec_type), INTENT(IN) :: becpsi
+    !! <beta|psi>
+    REAL(DP) :: exxe
+    !! exx energy
+    !
+    ! ... local variables
+    !
+    COMPLEX(DP), ALLOCATABLE :: xitmp(:,:)
+    COMPLEX(DP), ALLOCATABLE :: mexx_d(:,:)
+    REAL(DP) :: exxe0
+    REAL(DP), PARAMETER :: Zero=0._DP
+    INTEGER :: i
+    LOGICAL :: domat0
+#if defined(__CUDA)
+    ATTRIBUTES(DEVICE) :: xitmp_d, mexx_d
+#endif
+    !
+    CALL start_clock_gpu( 'aceinit' )
+    !
+    IF (nbndproj>nbnd) CALL errore( 'aceinit_k', 'nbndproj greater than nbnd.', 1 )
+    IF (nbndproj<=0)   CALL errore( 'aceinit_k', 'nbndproj le 0.', 1 )
+    !
+    ALLOCATE( mexx_d(nbndproj,nbndproj) )
+    ALLOCATE( xitmp(npwx*npol,nbndproj) )
+    xitmp = (Zero,Zero)
+    mexx_d = (Zero,Zero)
+    IF ( DoLoc ) THEN
+      !CALL vexx_loc_k( nnpw, nbndproj, xitmp, mexx, exxe )
+      !CALL MatSymm_k( 'S', 'L', mexx, nbndproj )
+    ELSE
+      ! |xi> = Vx[phi]|phi>
+      CALL vexx( npwx, nnpw, nbndproj, phi_d, xitmp, becpsi )
+      xitmp_d = xitmp
+      ! mexx = <phi|Vx[phi]|phi>
+      !$acc host_data use_device(phi_d)
+      CALL matcalc_k_gpu( 'exact', .TRUE., 0, current_k, npwx*npol, nbndproj, nbndproj, &
+                      phi_d, xitmp_d, mexx_d, exxe )
+      !$acc end host_data
+    ENDIF
+#if defined(__DEBUG)
+      WRITE( stdout,'(3(A,I3),A,I9,A,f12.6)') 'aceinit_k: nbnd=', nbnd, ' nbndproj=',nbndproj, &
+                                              ' k=',current_k,' npw=',nnpw,' Ex(k)=',exxe
+#endif
+    ! Skip k-points that have exactly zero weight
+    IF(wk(current_k)/=0._dp)THEN
+      ! |xi> = -One * Vx[phi]|phi> * rmexx^T
+      CALL aceupdate_k_gpu( nbndproj, nnpw, xitmp_d, mexx_d )
+    ENDIF
+    !
+    DEALLOCATE( xitmp )
+    DEALLOCATE( mexx_d )
+    !
+    IF ( DoLoc ) THEN
+      !  domat0 = domat
+      !  domat = .TRUE.
+      !  CALL vexxace_k( nnpw, nbnd, evc0(1,1,current_k), exxe )
+      !  evc0(:,:,current_k) = phi(:,:)
+      !  domat = domat0
+    ENDIF 
+    !
+    CALL stop_clock_gpu( 'aceinit' )
+    !
+  END SUBROUTINE aceinit_k_gpu
+  !
+  !
   !------------------------------------------------------------------------------
   SUBROUTINE aceupdate_k( nbndproj, nnpw, xitmp, mexx )
     !----------------------------------------------------------------------------
@@ -5013,6 +5100,49 @@ end associate
     CALL stop_clock( 'aceupdate' )
     !
   END SUBROUTINE aceupdate_k
+  !
+  !
+  !------------------------------------------------------------------------------
+  SUBROUTINE aceupdate_k_gpu( nbndproj, nnpw, xitmp_d, mexx_d )
+    !----------------------------------------------------------------------------
+    !! Updates xi(npw,nbndproj) for the ACE method.
+    !
+    USE wvfct,                ONLY : npwx
+    USE noncollin_module,     ONLY : noncolin, npol
+    !
+    IMPLICIT NONE
+    !
+    INTEGER :: nbndproj
+    !! number of bands
+    INTEGER :: nnpw
+    !! number of PW
+    COMPLEX(DP) :: mexx_d(nbndproj,nbndproj)
+    !! mexx = -(Cholesky(mexx))^-1
+    COMPLEX(DP) :: xitmp_d(npwx*npol,nbndproj)
+    !! |xi> = -One * Vx[phi]|phi> * mexx^T
+#if defined(__CUDA)
+    ATTRIBUTES(DEVICE) :: xitmp_d, mexx_d
+#endif
+    INTEGER :: i, j
+    !
+    CALL start_clock_gpu( 'aceupdate' )
+    !
+    ! mexx = -(Cholesky(mexx))^-1
+    !$cuf kernel do(2)
+    do i=1,nbndproj
+       do j=1,nbndproj
+          mexx_d(i,j) = -mexx_d(i,j)
+       enddo
+    enddo
+    CALL invchol_k_gpu( nbndproj, mexx_d )
+    !
+    ! |xi> = -One * Vx[phi]|phi> * mexx^T
+    CALL MYZTRMM( 'R', 'L', 'C', 'N', npwx*npol, nbndproj, (1.0_dp,0.0_dp), mexx_d,nbndproj, &
+                xitmp_d, npwx*npol )
+    !
+    CALL stop_clock_gpu( 'aceupdate' )
+    !
+  END SUBROUTINE aceupdate_k_gpu
   !
   !
   !--------------------------------------------------------------------------------------
