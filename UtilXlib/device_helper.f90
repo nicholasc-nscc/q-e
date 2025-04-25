@@ -202,6 +202,90 @@ SUBROUTINE MYDTRTRI( TRANS, M, A, N, INFO )
 #endif
 END SUBROUTINE MYDTRTRI
 !
+!
+SUBROUTINE MYZPOTRF( TRANS, M, A, N, INFO )
+#if defined(__CUDA)
+    use cudafor
+    use cusolverdn
+#endif
+    CHARACTER*1, INTENT(IN) :: TRANS
+    INTEGER, INTENT(IN) :: M, N
+    INTEGER, INTENT(INOUT) :: INFO
+    COMPLEX*16 :: A (M,*)
+#if defined(__CUDA)
+    INTEGER :: lwork, devinfo_d
+    COMPLEX*16, ALLOCATABLE :: work_d(:)
+    TYPE(cusolverDnHandle) :: handle
+    attributes(device) :: A, devinfo_d, work_d
+
+    IF (TRANS .eq. 'L') THEN
+      INFO = cusolverDnCreate(handle)
+      INFO = cusolverDnZpotrf_bufferSize (handle, CUBLAS_FILL_MODE_LOWER, M, A, N, lwork)
+      ALLOCATE(work_d(lwork), STAT = info)
+      INFO = cusolverDnZpotrf(handle, CUBLAS_FILL_MODE_LOWER, M, A, N, work_d, lwork, devinfo_d )
+      DEALLOCATE(work_d)
+      INFO = cusolverDnDestroy(handle)
+    ELSE
+      stop 999 ! TODO
+    ENDIF
+#else
+    CALL zpotrf( TRANS, M, A, N, INFO )
+#endif
+END SUBROUTINE MYZPOTRF
+!
+!
+SUBROUTINE MYZTRTRI( TRANS, DIAG, M, A, N, INFO )
+#if defined(__CUDA)
+    use cudafor
+    use cusolverdn
+#endif
+    CHARACTER*1, INTENT(IN) :: TRANS, DIAG
+    INTEGER, INTENT(IN) :: M, N
+    INTEGER, INTENT(INOUT) :: INFO
+    COMPLEX*16 :: A (M,*)
+#if defined(__CUDA)
+    INTEGER :: devinfo_d
+    ! old interface 
+    !INTEGER :: d_size
+    ! newer interface 
+    INTEGER(8), VALUE :: d_size, h_size
+    COMPLEX*16, ALLOCATABLE :: work(:)
+    COMPLEX*16, ALLOCATABLE :: work_d(:)
+    TYPE(cusolverDnHandle) :: handle
+    attributes(device) :: A, devinfo_d, work_d
+
+    IF (TRANS .eq. 'L' and DIAG .eq. 'N') THEN
+      INFO = cusolverDnCreate(handle)
+
+      ! Old interface
+      ! INFO = cusolverDnDtrtri_bufferSize (handle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
+      !                         M, A, N, d_size)
+      ! Newer interface
+      INFO = cusolverDnXtrtri_bufferSize (handle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
+                             M, cudaDataType(CUDA_C_64F), A, N, d_size, h_size)
+      !
+      ALLOCATE(work(h_size))
+      ALLOCATE(work_d(d_size))
+      !
+      ! Old interface
+      ! INFO = cusolverDnDtrtri(handle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
+      !                         M, A, N, work_d, d_size, devinfo_d)
+      ! Newer interface
+      INFO = cusolverDnXtrtri(handle, CUBLAS_FILL_MODE_LOWER, CUBLAS_DIAG_NON_UNIT, &
+                              M, cudaDataType(CUDA_C_64F), A, N, work_d, d_size, work, h_size, devinfo_d)
+      !
+      DEALLOCATE(work)
+      DEALLOCATE(work_d)
+      INFO = cusolverDnDestroy(handle)
+    ELSE
+      stop 999 ! TODO
+    ENDIF
+#else
+    CALL ztrtri( TRANS, DIAG, M, A, N, INFO )
+#endif
+END SUBROUTINE MYZTRTRI
+!
+!
 SUBROUTINE MYZTRMM(SIDE,UPLO,TRANSA,DIAG,M,N,ALPHA,A,LDA,B,LDB)
 ! 'R', 'L', 'C', 'N', nnpw, nbndproj, (One,Zero), cmexx_d, nbndproj, xitmp_d, nnpw
 #if defined(__CUDA)
