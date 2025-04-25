@@ -151,12 +151,12 @@ SUBROUTINE MYDPOTRF( TRANS, M, A, N, INFO )
 END SUBROUTINE MYDPOTRF
 !
 !
-SUBROUTINE MYDTRTRI( TRANS, M, A, N, INFO )
+SUBROUTINE MYDTRTRI( TRANS, DIAG, M, A, N, INFO )
 #if defined(__CUDA)
     use cudafor
     use cusolverdn
 #endif
-    CHARACTER*1, INTENT(IN) :: TRANS
+    CHARACTER*1, INTENT(IN) :: TRANS, DIAG
     INTEGER, INTENT(IN) :: M, N
     INTEGER, INTENT(INOUT) :: INFO
     DOUBLE PRECISION :: A (M,*)
@@ -171,7 +171,7 @@ SUBROUTINE MYDTRTRI( TRANS, M, A, N, INFO )
     TYPE(cusolverDnHandle) :: handle
     attributes(device) :: A, devinfo_d, work_d
 
-    IF (TRANS .eq. 'L') THEN
+    IF (TRANS .eq. 'L' and DIAG .eq. 'N') THEN
       INFO = cusolverDnCreate(handle)
 
       ! Old interface
@@ -198,7 +198,7 @@ SUBROUTINE MYDTRTRI( TRANS, M, A, N, INFO )
       stop 999 ! TODO
     ENDIF
 #else
-    CALL dtrtri( TRANS, 'N', M, A, N, INFO )
+    CALL dtrtri( TRANS, DIAG, M, A, N, INFO )
 #endif
 END SUBROUTINE MYDTRTRI
 !
