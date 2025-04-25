@@ -171,7 +171,7 @@ SUBROUTINE MYDTRTRI( TRANS, DIAG, M, A, N, INFO )
     TYPE(cusolverDnHandle) :: handle
     attributes(device) :: A, devinfo_d, work_d
 
-    IF (TRANS .eq. 'L' and DIAG .eq. 'N') THEN
+    IF (TRANS .eq. 'L' .and. DIAG .eq. 'N') THEN
       INFO = cusolverDnCreate(handle)
 
       ! Old interface
@@ -254,7 +254,7 @@ SUBROUTINE MYZTRTRI( TRANS, DIAG, M, A, N, INFO )
     TYPE(cusolverDnHandle) :: handle
     attributes(device) :: A, devinfo_d, work_d
 
-    IF (TRANS .eq. 'L' and DIAG .eq. 'N') THEN
+    IF (TRANS .eq. 'L' .and. DIAG .eq. 'N') THEN
       INFO = cusolverDnCreate(handle)
 
       ! Old interface
