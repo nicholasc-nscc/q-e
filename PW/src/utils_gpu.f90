@@ -261,24 +261,24 @@ SUBROUTINE MatSymm_k_gpu( MShape, How, Mat, n )
     !$cuf kernel do(2)
     do i = 1, n
       MatT(i,i) = Mat(i,i)
-      do j = i+1, n 
-        MatT(j,i) = Mat(j,i)
+      do j = 1, n 
+        if (j > i) MatT(j,i) = Mat(j,i)
       end do        
     end do        
   ELSE IF( How.eq.'U' ) then ! use upper
     !$cuf kernel do(2)
     do i = 1, n
       MatT(i,i) = Mat(i,i)
-      do j = i+1, n
-        MatT(j,i) = Mat(i,j)
+      do j = 1, n
+        if (j > i) MatT(j,i) = Mat(i,j)
       end do        
     end do        
   ELSE IF( How.eq.'S' ) then ! use average 
     !$cuf kernel do(2)
     do i = 1, n
       MatT(i,i) = Mat(i,i)
-      do j = i+1, n
-        MatT(j,i) = (Mat(i,j) + Mat(j,i))  / Two
+      do j = 1, n
+        if (j > i) MatT(j,i) = (Mat(i,j) + Mat(j,i))  / Two
       end do        
     end do        
   ELSE
@@ -298,8 +298,8 @@ SUBROUTINE MatSymm_k_gpu( MShape, How, Mat, n )
     !$cuf kernel do(2)
     do i = 1, n
       Mat(i,i) = MatT(i,i)
-      do j = i+1, n
-        Mat(i,j) = MatT(j,i)   
+      do j = 1, n
+        if (j > i) Mat(i,j) = MatT(j,i)   
       end do        
     end do        
   ELSE IF(MShape.eq.'S') then ! return square
@@ -311,8 +311,8 @@ SUBROUTINE MatSymm_k_gpu( MShape, How, Mat, n )
     end do
     !$cuf kernel do(2)  
     do i = 1, n
-      do j = i+1, n
-        Mat(i,j) = MatT(j,i)   
+      do j = 1, n
+        if (j > i) Mat(i,j) = MatT(j,i)   
       end do        
     end do        
   ELSE
