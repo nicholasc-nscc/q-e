@@ -175,7 +175,7 @@ SUBROUTINE MatCholInv_gpu( MShape, n, A )
   ! MatInv
   IF(MShape.eq.'L'.or.MShape.eq.'U') then 
     INFO = -1
-    CALL MYDTRTRI( MShape, DIAG, n, A, n, INFO )
+    CALL MYDTRTRI( MShape, 'N', n, A, n, INFO )
     CALL errinfo('MYDTRTRI','inversion failed in MatCholInv.',INFO)
   ELSEIF(MShape.eq.'G') then 
     CALL errinfo( 'MYDGETRI', 'Mshape not implemented in MatCholInv.', INFO )
