@@ -879,7 +879,6 @@ MODULE exx
   !
   !
     !------------------------------------------------------------------------
-    ! NSCC
   SUBROUTINE exxinit_gpu( DoLoc, nbndproj_ )
     !------------------------------------------------------------------------
     !! This subroutine is run before the first H_psi() of each iteration. 
@@ -917,7 +916,6 @@ MODULE exx
 #if defined(__CUDA)
     USE device_memcpy_m,      ONLY : dev_memset
     USE device_fbuff_m,       ONLY : dev_buf
-    ! TODO: Add the variables needed later.
 #endif
     !
     IMPLICIT NONE
@@ -934,23 +932,13 @@ MODULE exx
     INTEGER :: ibnd_loop_start
     INTEGER :: ipol, jpol
     REAL(DP), ALLOCATABLE :: occ(:,:)
-    COMPLEX(DP),ALLOCATABLE :: temppsic(:)
-#if defined(__USE_INTEL_HBM_DIRECTIVES)
-!DIR$ ATTRIBUTES FASTMEM :: temppsic
-#elif defined(__USE_CRAY_HBM_DIRECTIVES)
-!DIR$ memory(bandwidth) temppsic
-#endif
+#if defined(__CUDA)
     COMPLEX(DP),ALLOCATABLE :: psic_nc_d(:,:)
-#if defined(__CUDA)
     attributes(DEVICE)      :: psic_nc_d
-#endif
-!! NSCC
-#if defined(__CUDA)
+
     COMPLEX(DP),ALLOCATABLE :: temppsic_d(:), temppsic_nc_d(:,:)
     attributes(DEVICE)      :: temppsic_d, temppsic_nc_d
-#endif
 
-#if defined(__CUDA)
     COMPLEX(DP),ALLOCATABLE :: psic_exx_d(:)
     attributes(DEVICE)      :: psic_exx_d
 #endif
@@ -969,6 +957,8 @@ MODULE exx
 #if defined(__CUDA)
     COMPLEX(DP) :: d_spin_d(2,2,48)
     attributes(DEVICE) :: d_spin_d
+    INTEGER, ALLOCATABLE :: rir_d(:,:), index_sym_d(:)
+    attributes(DEVICE) :: rir_d, index_sym_d
 #endif
     INTEGER :: npw, current_ik
     INTEGER, EXTERNAL :: global_kpoint_index
@@ -976,10 +966,6 @@ MODULE exx
     INTEGER :: ibnd_exx, evc_offset
     !
     !
-    ! local variables
-    INTEGER, ALLOCATABLE :: rir_d(:,:), index_sym_d(:)
-    attributes(DEVICE) :: rir_d, index_sym_d
-
     !hack around PGI bug
     INTEGER, POINTER :: dfftt__nl(:)
     INTEGER, POINTER :: dfftt__nlm(:)
@@ -989,7 +975,6 @@ MODULE exx
     attributes(DEVICE) :: dfftt__nlm    
 #endif
     !
-
     CALL start_clock_gpu ('exxinit')
     IF ( Doloc ) THEN
         WRITE(stdout,'(/,5X,"Using localization algorithm with threshold: ",&
@@ -1418,7 +1403,6 @@ MODULE exx
     ! Initialize 4-wavefunctions one-center Fock integrals
     !    \int \psi_a(r)\phi_a(r)\phi_b(r')\psi_b(r')/|r-r'|
     !
-    ! NSCC: TODO?
     IF (okpaw) CALL PAW_init_fock_kernel()
     !
     CALL change_data_structure( .FALSE. )
@@ -3107,7 +3091,6 @@ end associate
           END DO !IJT
           !
           ! get the next nbnd/negrp data
-          ! NSCC untested
           IF (negrp>1) THEN
              call mp_circular_shift_left( exxbuff_d(:,:,ikq), me_egrp, inter_egrp_comm )
           ENDIF
@@ -4376,7 +4359,7 @@ end associate
     USE uspp,               ONLY : nkb, vkb, okvan
     USE becmod,             ONLY : allocate_bec_type, deallocate_bec_type, &
                                    bec_type, calbec, &
-                                   allocate_bec_type_acc, deallocate_bec_type_acc ! NSCC
+                                   allocate_bec_type_acc, deallocate_bec_type_acc
     USE lsda_mod,           ONLY : current_spin, lsda, isk
     USE io_files,           ONLY : nwordwfc, iunwfc
     USE buffers,            ONLY : get_buffer
@@ -4385,7 +4368,6 @@ end associate
     USE mp,                 ONLY : mp_sum
     USE wavefunctions,      ONLY : evc
     USE uspp_init,          ONLY : init_us_2
-    ! NSCC
     USE control_flags,       ONLY : offload_type
     !
     IMPLICIT NONE
@@ -4411,7 +4393,6 @@ end associate
 #if defined (__CUDA)
     IF (.NOT. ALLOCATED(xi_d)) ALLOCATE( xi_d(npwx*npol,nbndproj) )
 #endif
-    ! NSCC
     IF (use_gpu) THEN
        IF ( okvan ) CALL allocate_bec_type_acc( nkb, nbnd, becpsi )
     ELSE
@@ -4432,20 +4413,16 @@ end associate
 
        IF ( okvan ) THEN
           CALL init_us_2( npw, igk_k(1,ik), xk(:,ik), vkb )
-          ! NSCC
 #if defined(__CUDA)
           CALL calbec(offload_type, npw, vkb, evc, becpsi, nbnd )
 #elif
           CALL calbec( npw, vkb, evc, becpsi, nbnd )
 #endif
        ENDIF
-       ! NSCC
        IF (use_gpu) THEN
          IF (gamma_only) THEN
-         ! To check first
             CALL aceinit_gamma_gpu( DoLoc, npw, nbnd, evc, xi_d, becpsi, ee )
          ELSE
-         ! To be implemented
             CALL aceinit_k_gpu( DoLoc, npw, nbnd, evc, xi_d, becpsi, ee )
          ENDIF
          xi(:,:,ik) = xi_d(:,:)
@@ -4848,7 +4825,6 @@ end associate
     !----------------------------------------------------------------------------------------
     !! Build the ACE operator from the potential amd matrix (rmexx is assumed symmetric
     !! and only the Lower Triangular part is considered).
-    !! NSCC GPU accelerated version. 
     IMPLICIT NONE
     !
     INTEGER :: nbndproj
