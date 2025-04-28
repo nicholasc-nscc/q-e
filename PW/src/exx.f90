@@ -1315,7 +1315,7 @@ MODULE exx
 ! #else
                   !$cuf kernel do(1)
                    DO ipol = 1, npol                
-                      DO ir = 1, nxxs
+                      DO ir = 1, nrxxs
                          psic_nc_d(ir,ipol) = (0._DP,0._DP)
                          DO jpol = 1, npol
                             psic_nc_d(ir,ipol) = psic_nc_d(ir,ipol) + CONJG(d_spin_d(jpol,ipol,isym))* &
