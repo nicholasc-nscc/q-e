@@ -1051,7 +1051,7 @@ MODULE exx
                                                 dfftt%nr1x, dfftt%nr2x, dfftt%nr3x )
       ALLOCATE( rir_d(nxxs,nsym) )
       rir_d = rir
-      ALLOCATE( index_sym_d(nspin_lsda*nkqs) )
+      ALLOCATE( index_sym_d(nkqs) )
       index_sym_d = index_sym
     ENDIF                                             
     ! set occupations of wavefunctions used in the calculation of exchange term
