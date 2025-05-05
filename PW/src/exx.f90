@@ -295,7 +295,6 @@ MODULE exx
     USE us_exx,    ONLY : becxx
     USE exx_base,  ONLY : xkq_collect, index_xkq, index_xk, index_sym, rir, &
                           working_pool, exx_grid_initialized
-    ! NSCC possible memory leak? not deallocated.
     USE exx_band,  ONLY : evc_exx
     !
     IMPLICIT NONE
@@ -977,11 +976,12 @@ MODULE exx
     !
     CALL start_clock_gpu ('exxinit')
     IF ( Doloc ) THEN
-        WRITE(stdout,'(/,5X,"Using localization algorithm with threshold: ",&
-                & D10.2)') local_thr
-        ! IF (.NOT.gamma_only) CALL errore('exxinit','SCDM with K-points NYI',1)
-        IF (okvan .OR. okpaw) CALL errore( 'exxinit','SCDM with USPP/PAW not &
-                                           &implemented', 1 )
+        CALL errore( 'exxinit','GPU-accelerated SCDM not fully implemented.',1)
+      !   WRITE(stdout,'(/,5X,"Using localization algorithm with threshold: ",&
+      !           & D10.2)') local_thr
+      !   ! IF (.NOT.gamma_only) CALL errore('exxinit','SCDM with K-points NYI',1)
+      !   IF (okvan .OR. okpaw) CALL errore( 'exxinit','SCDM with USPP/PAW not &
+      !                                      &implemented', 1 )
     ENDIF 
     IF ( use_ace ) &
         WRITE(stdout,'(/,5X,"Using ACE for calculation of exact exchange")') 
@@ -1098,7 +1098,6 @@ MODULE exx
         max_buff_bands_per_egrp = MAXVAL(all_end(:)-all_start(:))+1
     ENDIF
     !
-    ! NSCC: TODO DoLoc later. Maybe need to mention not implemented yet.
     IF (DoLoc) THEN
       !
       IF (gamma_only) THEN
@@ -4572,7 +4571,6 @@ end associate
     mexx_d = Zero  
     !  
     IF ( DoLoc ) then    
-      ! TODO for GPU. Placeholder for now
       ! CALL vexx_loc_gpu( nnpw, nbndproj, xitmp_d, mexx_d )
       ! CALL MatSymm_gpu( 'S', 'L', mexx_d, nbndproj )
     ELSE  
@@ -4592,11 +4590,9 @@ end associate
     DEALLOCATE (xitmp)
     DEALLOCATE( mexx_d )  
     !
-    ! TODO.
    !  IF ( local_thr > 0.0d0 ) THEN
    !    domat0 = domat
    !    domat = .TRUE.  
-   !    ! NSCC: possible sub vexxace_gamma_gpu?
    !    CALL vexxace_gamma( nnpw, nbndproj, evc0(1,1,current_spin), exxe )  
    !    evc0(:,:,current_spin) = phi(:,:)  
    !    domat = domat0  
