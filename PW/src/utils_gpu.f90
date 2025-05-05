@@ -223,6 +223,108 @@ SUBROUTINE invchol_k_gpu( n, A )
 
 END SUBROUTINE invchol_k_gpu
 !
+!-------------------------------------------------------------------------
+SUBROUTINE MatSymm_gpu( MShape, How, Mat, n )
+  !------------------------------------------------------------------------
+  !! Symmetrize the (square) matrix Mat.
+  !
+  USE kinds, ONLY : dp
+  !
+  IMPLICIT NONE
+  !
+  CHARACTER(LEN=1) :: How
+  !! U: copying the upper block into the lower block;  
+  !! L: copying the lower block into the upper block;  
+  !! S: averaging
+  CHARACTER(LEN=1) :: MShape
+  !! U: return the Upper Triangular (Zeros in Lower);  
+  !! L: return the Lower Triangular (Zeros in Upper);  
+  !! S: return the Square symmetric matrix
+  INTEGER :: n
+  !! the matrix dimension
+  REAL(DP) :: Mat(n,n)
+  !! input/output matrix
+  !
+  ! ... local variables
+  !
+  INTEGER :: i, j
+  REAL(DP), ALLOCATABLE :: MatT(:,:)
+  REAL(DP), PARAMETER :: Zero=0.0d0, Two=2.0d0
+#if defined(__CUDA)
+  ATTRIBUTES(DEVICE) :: Mat, MatT
+#endif
+  !
+  ALLOCATE( MatT(n,n) )
+  !
+! Properly fill the lower triangular of MatT
+  MatT = Zero 
+  IF(How.eq.'L') then ! use lower
+    !$cuf kernel do(2)
+    do i = 1, n
+      do j = 1, n 
+        MatT(i,i) = Mat(i,i)
+        if (j > i) MatT(j,i) = Mat(j,i)
+      end do        
+    end do       
+  ELSE IF( How.eq.'U' ) then ! use upper
+    !$cuf kernel do(2)
+    do i = 1, n
+      do j = 1, n
+        MatT(i,i) = Mat(i,i)
+        if (j > i) MatT(j,i) = Mat(i,j)
+      end do        
+    end do        
+  ELSE IF( How.eq.'S' ) then ! use average 
+    !$cuf kernel do(2)
+    do i = 1, n
+      do j = 1, n
+        MatT(i,i) = Mat(i,i)
+        if (j > i) MatT(j,i) = (Mat(i,j) + Mat(j,i))  / Two
+      end do        
+    end do         
+  ELSE
+    Call errore('MatSymm_gpu','Wrong How in MatSymm_gpu.',1)
+  END IF 
+
+! Properly copy the results in Mat
+  Mat = Zero 
+  IF(MShape.eq.'L') then ! return lower 
+    !$cuf kernel do(2)
+    do i = 1, n
+      do j = 1, n
+        Mat(i,j) = MatT(i,j)
+      enddo
+    end do
+  ELSE IF(MShape.eq.'U') then ! return upper  
+    !$cuf kernel do(2)
+    do i = 1, n
+      do j = 1, n
+        MatT(i,i) = Mat(i,i)
+        if (j > i) Mat(i,j) = MatT(j,i)   
+      end do        
+    end do       
+  ELSE IF(MShape.eq.'S') then ! return square
+    !$cuf kernel do(2)
+    do i = 1, n
+      do j = 1, n
+        Mat(i,j) = MatT(i,j)
+      enddo
+    end do
+    !$cuf kernel do(2)  
+    do i = 1, n
+      do j = 1, n
+        if (j > i) Mat(i,j) = MatT(j,i)   
+      end do        
+    end do          
+  ELSE
+    Call errore('MatSymm_gpu','Wrong MShape in MatSymm_gpu.',1)
+  END IF 
+
+  DEALLOCATE( MatT )
+
+END SUBROUTINE MatSymm_gpu
+!
+!
 !----------------------------------------------------------------
 SUBROUTINE MatSymm_k_gpu( MShape, How, Mat, n )
   !---------------------------------------------------------------
