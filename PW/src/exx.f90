@@ -4572,9 +4572,8 @@ end associate
     mexx_d = Zero  
     !  
     IF ( DoLoc ) then    
-      ! TODO for GPU. Placeholder for now
-      ! CALL vexx_loc_gpu( nnpw, nbndproj, xitmp_d, mexx_d )
-      ! CALL MatSymm_gpu( 'S', 'L', mexx_d, nbndproj )
+      CALL vexx_loc_gpu( nnpw, nbndproj, xitmp_d, mexx_d )
+      CALL MatSymm_gpu( 'S', 'L', mexx_d, nbndproj )
     ELSE  
       ! |xi> = Vx[phi]|phi>
       CALL vexx( nnpw, nnpw, nbndproj, phi_d, xitmp, becpsi )
@@ -4584,23 +4583,21 @@ end associate
       CALL matcalc_gpu( 'exact', .TRUE., 0, nnpw, nbndproj, nbndproj, phi_d, xitmp_d, mexx_d, exxe )
       !$acc end host_data
       ! |xi> = -One * Vx[phi]|phi> * rmexx^T
-      ! phi_d: ok? acc copy from aceinit. 
     ENDIF  
     !
     CALL aceupdate_gpu( nbndproj, nnpw, xitmp_d, mexx_d )
     !
-    DEALLOCATE (xitmp)
+    DEALLOCATE( xitmp )
     DEALLOCATE( mexx_d )  
     !
-    ! TODO.
-   !  IF ( local_thr > 0.0d0 ) THEN
-   !    domat0 = domat
-   !    domat = .TRUE.  
-   !    ! NSCC: possible sub vexxace_gamma_gpu?
-   !    CALL vexxace_gamma( nnpw, nbndproj, evc0(1,1,current_spin), exxe )  
-   !    evc0(:,:,current_spin) = phi(:,:)  
-   !    domat = domat0  
-   !  ENDIF
+    IF ( local_thr > 0.0d0 ) THEN
+      domat0 = domat
+      domat = .TRUE.  
+      !$acc host_data use_device(phi_d)
+      CALL vexxace_gamma( nnpw, nbndproj, phi_d, exxe )  
+      !$acc end host_data
+      domat = domat0  
+    ENDIF
     !
     CALL stop_clock_gpu( 'aceinit' )  
     !
@@ -5006,8 +5003,8 @@ end associate
     xitmp = (Zero,Zero)
     mexx_d = (Zero,Zero)
     IF ( DoLoc ) THEN
-      !CALL vexx_loc_k( nnpw, nbndproj, xitmp, mexx, exxe )
-      !CALL MatSymm_k( 'S', 'L', mexx, nbndproj )
+      CALL vexx_loc_k_gpu( nnpw, nbndproj, xitmp_d, mexx_d, exxe )
+      CALL MatSymm_k_gpu( 'S', 'L', mexx_d, nbndproj )
     ELSE
       ! |xi> = Vx[phi]|phi>
       CALL vexx( npwx, nnpw, nbndproj, phi_d, xitmp, becpsi )
@@ -5032,11 +5029,12 @@ end associate
     DEALLOCATE( mexx_d )
     !
     IF ( DoLoc ) THEN
-      !  domat0 = domat
-      !  domat = .TRUE.
-      !  CALL vexxace_k( nnpw, nbnd, evc0(1,1,current_k), exxe )
-      !  evc0(:,:,current_k) = phi(:,:)
-      !  domat = domat0
+       domat0 = domat
+       domat = .TRUE.
+       !$acc host_data use_device(phi_d)
+       CALL vexxace_k_gpu( nnpw, nbnd, phi_d, exxe )
+       !$acc end host_data
+       domat = domat0
     ENDIF 
     !
     CALL stop_clock_gpu( 'aceinit' )
@@ -5460,6 +5458,221 @@ end associate
   END SUBROUTINE vexx_loc
   !
   !
+  !---------------------------------------------------------------------------------
+  SUBROUTINE vexx_loc_gpu( npw, nbnd, hpsi_d, mexx_d )
+    !---------------------------------------------------------------------------------
+    !! Exact exchange with SCDM orbitals.  
+    !! Vx|phi> =  Vx|psi> <psi|Vx|psi>^(-1) <psi|Vx|phi>.  
+    !! locmat contains localization integrals.
+    !
+    USE noncollin_module,  ONLY : npol
+    USE cell_base,         ONLY : omega, alat
+    USE wvfct,             ONLY : current_k
+    USE klist,             ONLY : xk, nks, nkstot
+    USE fft_interfaces,    ONLY : fwfft, invfft
+    USE mp,                ONLY : mp_stop, mp_barrier, mp_sum
+    USE mp_bands,          ONLY : intra_bgrp_comm, me_bgrp, nproc_bgrp
+    USE exx_base,          ONLY : nqs, xkq_collect, index_xkq, index_xk, &
+                                  g2_convolution
+    !
+    IMPLICIT NONE
+    !
+    INTEGER :: npw
+    !! number of PW
+    INTEGER :: nbnd
+    !! number of bands
+    COMPLEX(DP) :: hpsi_d(npw,nbnd)
+    !! hpsi
+    REAL(DP) :: mexx_d(nbnd,nbnd)
+    !! mexx contains in output the exchange matrix
+    ATTRIBUTES(DEVICE) :: hpsi_d, mexx_d
+    !
+    ! ... local variables
+    !
+    INTEGER :: nrxxs, npairs, ntot, NBands   
+    INTEGER :: ig, ir, ik, ikq, iq, ibnd, jbnd, kbnd, NQR  
+    INTEGER :: current_ik  
+    REAL(DP) :: exxe  
+    COMPLEX(DP), ALLOCATABLE :: rhoc(:), vc(:), RESULT(:,:)   
+    REAL(DP), ALLOCATABLE :: fac(:)  
+    REAL(DP) :: xkp(3), xkq(3)  
+    INTEGER, EXTERNAL  :: global_kpoint_index  
+    !
+    REAL(DP), ALLOCATABLE :: fac_d(:)
+    COMPLEX(DP), ALLOCATABLE :: rhoc_d(:), vc_d(:), RESULT_d(:,:) 
+    REAl(DP) :: omega_d
+    REAL(DP) :: exxalfa_d
+    ATTRIBUTES(DEVICE) :: RESULT_d, omega_d, exxalfa_d, fac_d, rhoc_d, vc_d
+    !
+    !hack around PGI bug
+    INTEGER, POINTER :: dfftt__nl(:)
+    INTEGER, POINTER :: dfftt__nlm(:)
+#if defined(__CUDA)
+    attributes(DEVICE) :: dfftt__nl
+    attributes(DEVICE) :: dfftt__nlm    
+#endif
+    dfftt__nl=>dfftt%nl_d
+    dfftt__nlm=>dfftt%nlm_d
+
+    WRITE( stdout, '(5X,A)' ) ' '   
+    WRITE( stdout, '(5X,A)' ) 'Exact-exchange with localized orbitals'  
+    !
+    CALL start_clock_gpu( 'vexxloc' )
+    !
+    WRITE( stdout,'(7X,A,f24.12)' ) 'local_thr =', local_thr  
+    nrxxs = dfftt%nnr  
+    !
+    ! ... exchange projected onto localized orbitals 
+    WRITE( stdout,'(A)' ) 'Allocating exx quantities...'
+    ALLOCATE( fac(dfftt%ngm) )
+    ALLOCATE( fac_d(dfftt%ngm) )
+    ALLOCATE( rhoc_d(nrxxs), vc_d(nrxxs) )
+    ALLOCATE( RESULT_d(nrxxs,nbnd) ) 
+    WRITE( stdout,'(A)' ) 'Allocations done.'
+    !
+    current_ik = global_kpoint_index( nkstot, current_k )
+    xkp = xk(:,current_k)
+    !
+    vc_d = (0.0d0, 0.0d0)
+    npairs = 0 
+    !
+    ! assign local variables in device.
+    omega_d = omega
+    exxalfa_d = exxalfa
+    !
+    DO iq = 1, nqs
+       ikq  = index_xkq(current_ik,iq)  
+       ik   = index_xk(ikq)  
+       xkq  = xkq_collect(:,ikq)  
+       !  
+       CALL g2_convolution( dfftt%ngm, gt, xkp, xkq, fac )  
+       !  
+       fac_d = fac
+       RESULT_d = (0.0d0, 0.0d0)  
+       !  
+       DO ibnd = 1, nbnd  
+         !
+         IF (x_occupation(ibnd,ikq) > 0.0d0) THEN
+           !
+           !$cuf kernel do(1)
+           DO ir = 1, nrxxs   
+             rhoc_d(ir) = locbuff_d(ir,ibnd,ikq) * locbuff_d(ir,ibnd,ikq) / omega_d  
+           ENDDO
+           !
+           CALL fwfft( 'Rho', rhoc_d, dfftt )
+           !
+           vc_d = (0.0d0, 0.0d0)
+           !$cuf kernel do(1)  
+           DO ig = 1, dfftt%ngm  
+               vc_d(dfftt__nl(ig))  = fac_d(ig) * rhoc_d(dfftt__nl(ig))   
+               vc_d(dfftt__nlm(ig)) = fac_d(ig) * rhoc_d(dfftt__nlm(ig))  
+           ENDDO  
+           !
+           CALL invfft( 'Rho', vc_d, dfftt )
+           !
+           !$cuf kernel do(1)
+           DO ir = 1, nrxxs   
+             RESULT_d(ir,ibnd) = RESULT_d(ir,ibnd) + locbuff_d(ir,ibnd,ikq) * vc_d(ir)   
+           ENDDO  
+           !
+         ENDIF   
+         !
+         DO kbnd = 1, ibnd-1  
+           IF ( (locmat(ibnd,kbnd,ikq) > local_thr) .AND. &  
+                ( (x_occupation(ibnd,ikq) > 0.0d0) .OR.   &
+                  (x_occupation(kbnd,ikq) > 0.0d0) ) ) THEN
+             !
+             !write(stdout,'(3I4,3f12.6,A)') ikq, ibnd, kbnd, x_occupation(ibnd,ikq), &
+             !                    x_occupation(kbnd,ikq), locmat(ibnd,kbnd,ikq), ' IN '
+             !
+             !$cuf kernel do(1)
+             DO ir = 1, nrxxs   
+               rhoc_d(ir) = locbuff_d(ir,ibnd,ikq) * locbuff_d(ir,kbnd,ikq) / omega_d 
+             ENDDO
+             !
+             npairs = npairs + 1  
+             !
+             CALL fwfft( 'Rho', rhoc_d, dfftt )
+             !
+             vc_d = (0.0d0, 0.0d0)
+             !
+             !$cuf kernel do(1)
+             DO ig = 1, dfftt%ngm  
+                 vc_d(dfftt__nl(ig))  = fac_d(ig) * rhoc_d(dfftt__nl(ig))   
+                 vc_d(dfftt__nlm(ig)) = fac_d(ig) * rhoc_d(dfftt__nlm(ig))   
+             ENDDO
+             !
+             CALL invfft( 'Rho', vc_d, dfftt )
+             !
+             !$cuf kernel do(1)
+             DO ir = 1, nrxxs   
+               RESULT_d(ir,kbnd) = RESULT_d(ir,kbnd) + x_occupation_d(ibnd,ikq) * locbuff_d(ir,ibnd,ikq) * vc_d(ir)   
+             ENDDO
+             !
+             !$cuf kernel do(1)
+             DO ir = 1, nrxxs   
+               RESULT_d(ir,ibnd) = RESULT_d(ir,ibnd) + x_occupation_d(kbnd,ikq) * locbuff_d(ir,kbnd,ikq) * vc_d(ir)   
+             ENDDO
+             ! ELSE   
+             !   write(stdout,'(3I4,3f12.6,A)') ikq, ibnd, kbnd, x_occupation(ibnd,ikq), &
+             !               x_occupation(kbnd,ikq), locmat(ibnd,kbnd,ikq), '      OUT '  
+           ENDIF
+           !
+         ENDDO
+         !
+       ENDDO   
+       !
+       DO jbnd = 1, nbnd  
+         !
+         CALL fwfft( 'Wave', RESULT_d(:,jbnd), dfftt )
+         !
+         !$cuf kernel do(1)
+         DO ig = 1, npw  
+            hpsi_d(ig,jbnd) = hpsi_d(ig,jbnd) - exxalfa_d*RESULT_d(dfftt__nl(ig),jbnd)   
+         ENDDO
+         !
+       ENDDO
+       !
+    ENDDO
+    !
+    DEALLOCATE( fac, fac_d, vc_d )
+    DEALLOCATE( RESULT_d )
+    !
+    ! ... localized functions to G-space and exchange matrix onto localized functions
+    ALLOCATE( RESULT_d(npw,nbnd) )
+    RESULT_d = (0.0d0,0.0d0)
+    !
+    DO jbnd = 1, nbnd
+      !$cuf kernel do(1)
+      DO ig = 1, nrxxs
+        rhoc_d(ig) = DBLE(locbuff_d(ig,jbnd,ikq)) + (0.0d0,1.0d0)*0.0d0
+      ENDDO
+      !
+      CALL fwfft( 'Wave' , rhoc_d, dfftt )
+      !
+      !$cuf kernel do(1)
+      DO ig = 1, npw
+        RESULT_d(ig,jbnd) = rhoc_d(dfftt__nl(ig))
+      ENDDO
+    ENDDO
+    !
+    DEALLOCATE( rhoc_d )
+    !
+    CALL matcalc_gpu( 'M1-', .TRUE., 0, npw, nbnd, nbnd, RESULT_d, hpsi_d, mexx_d, exxe )
+    !
+    DEALLOCATE( RESULT_d )
+    !
+    NBands = INT(SUM(x_occupation(:,ikq)))
+    ntot = NBands * (NBands-1)/2 + NBands * (nbnd-NBands)
+    WRITE( stdout,'(7X,2(A,I12),A,f12.2)') '  Pairs(full): ',      ntot, &
+                  '   Pairs(included): ', npairs, &
+                  '   Pairs(%): ', DBLE(npairs)/DBLE(ntot)*100.0d0
+    !
+    CALL stop_clock_gpu( 'vexxloc' )
+    !
+  END SUBROUTINE vexx_loc_gpu
+  !
+  !
   !----------------------------------------------------------------------------------------------
   SUBROUTINE compute_density( DoPrint, Shift, CenterPBC, SpreadPBC, Overlap, PsiI, PsiJ, NQR, &
                               ibnd, jbnd )
@@ -5789,4 +6002,166 @@ end associate
   END SUBROUTINE vexx_loc_k
   !
   !
+  !
+  !
+  !------------------------------------------------------------------------
+  SUBROUTINE vexx_loc_k_gpu( npw, NBands, hpsi_d, mexx_d, exxe )
+    !-----------------------------------------------------------------------
+    !! Generic, k-point version of \(\texttt{vexx}\).
+    !
+    USE cell_base,       ONLY : omega
+    USE gvect,           ONLY : ngm, g
+    USE wvfct,           ONLY : current_k, npwx
+    USE klist,           ONLY : xk, nks, nkstot
+    USE fft_interfaces,  ONLY : fwfft, invfft
+    USE exx_base,        ONLY : index_xkq, nqs, index_xk, xkq_collect, &
+                                g2_convolution
+    USE exx_band,        ONLY : igk_exx_d 
+    !
+    IMPLICIT NONE
+    !
+    INTEGER :: npw
+    !! number of PW
+    INTEGER :: NBands 
+    !! number of bands
+    COMPLEX(DP) :: hpsi_d(npwx*npol,NBands)
+    !! h psi
+    COMPLEX(DP) :: mexx_d(NBands,NBands)
+    !! mexx contains in output the exchange matrix
+    ATTRIBUTES(DEVICE) :: hpsi_d, mexx_d
+    !
+    REAL(DP) :: exxe
+    !! exx energy
+    !
+    ! ... local variables
+    !
+    COMPLEX(DP), ALLOCATABLE :: RESULT(:), RESULT2(:,:)
+    COMPLEX(DP), ALLOCATABLE :: rhoc(:), vc(:)
+    REAL(DP), ALLOCATABLE :: fac(:)
+    INTEGER :: ibnd, jbnd, ik, ikq, iq
+    INTEGER :: ir, ig, NBin, NBtot
+    INTEGER :: current_ik, current_jk
+    INTEGER :: nrxxs
+    REAL(DP) :: xkp(3)
+    REAL(DP) :: xkq(3)
+    !
+    !
+    REAL(DP), ALLOCATABLE :: fac_d(:)
+    COMPLEX(DP), ALLOCATABLE :: rhoc_d(:), vc_d(:), RESULT_d(:,:) 
+    REAl(DP) :: omega_d
+    REAL(DP) :: exxalfa_d
+    INTEGER :: nqs_d
+    ATTRIBUTES(DEVICE) :: RESULT_d, RESULT2_d, omega_d, exxalfa_d, nqs_d, fac_d, rhoc_d, vc_d
+    !
+    !hack around PGI bug
+    INTEGER, POINTER :: dfftt__nl(:)
+    INTEGER, POINTER :: dfftt__nlm(:)
+#if defined(__CUDA)
+    attributes(DEVICE) :: dfftt__nl
+    attributes(DEVICE) :: dfftt__nlm    
+#endif
+    dfftt__nl=>dfftt%nl_d
+    dfftt__nlm=>dfftt%nlm_d
+    !
+    INTEGER, EXTERNAL :: global_kpoint_index
+    !
+    CALL start_clock_gpu( 'vexxloc' )
+    !
+    ALLOCATE( fac(dfftt%ngm), fac_d(dfftt%ngm) )
+    !
+    nrxxs = dfftt%nnr
+    !
+    ALLOCATE( RESULT_d(nrxxs) )
+    ALLOCATE( rhoc_d(nrxxs), vc_d(nrxxs) )
+    !
+    current_ik = global_kpoint_index ( nkstot, current_k )
+    current_jk = index_xkq(current_ik,1)
+    !
+    ! assign local variables in device.
+    omega_d = omega
+    exxalfa_d = exxalfa
+    nqs_d = nqs
+    !
+    NBin = 0  
+    NBtot  = 0
+    xkp = xk(:,current_k)
+    DO jbnd = 1, NBands 
+       RESULT_d = (0.0_DP, 0.0_DP) 
+       DO iq = 1, nqs
+          ikq = index_xkq(current_ik,iq)
+          ik  = index_xk(ikq)
+          xkq = xkq_collect(:,ikq)
+          CALL g2_convolution( dfftt%ngm, gt, xkp, xkq, fac )
+          fac_d = fac
+          DO ibnd = 1, NBands 
+             ! IF ( abs(x_occupation(ibnd,ik)) < eps_occ) CYCLE 
+             ! 
+             NBtot = NBtot + 1 
+             IF ((exxmat(ibnd,ikq,jbnd,current_k) > local_thr).AND. &
+                ((x_occupation(ibnd,ik) > eps_occ))) THEN 
+                  NBin = NBin + 1
+               !
+               ! write(stdout,'(4I4,f12.6,A)') ibnd, ikq, jbnd, current_k, exxmat(ibnd,ikq,jbnd,current_k), ' IN '
+               !$cuf kernel do(1)
+               DO ir = 1, nrxxs
+                  rhoc_d(ir)=CONJG(exxbuff_d(ir,ibnd,ikq))*exxbuff_d(ir,jbnd,current_jk) / omega_d
+               ENDDO
+               CALL fwfft( 'Rho', rhoc_d, dfftt )
+               vc_d = (0._DP, 0._DP)
+               !$cuf kernel do(1)
+               DO ig = 1, dfftt%ngm  
+                  vc_d(dfftt__nl(ig)) = & 
+                        fac_d(ig) * rhoc_d(dfftt__nl(ig)) * x_occupation_d(ibnd,ik) / nqs_d
+               ENDDO
+               CALL invfft( 'Rho', vc_d, dfftt )
+               !$cuf kernel do(1)
+               DO ir = 1, nrxxs
+                  RESULT_d(ir) = RESULT_d(ir) + vc_d(ir)*exxbuff_d(ir,ibnd,ikq)
+               ENDDO
+!            ELSE
+!              write(stdout,'(4I4,f12.6,A)') ibnd, ikq, jbnd, current_k, exxmat(ibnd,ikq,jbnd,current_k), ' OUT'
+             ENDIF 
+         ENDDO
+       ENDDO 
+       !
+       CALL fwfft( 'Wave', RESULT_d, dfftt )
+       !
+       !$cuf kernel do(1)
+       DO ig = 1, npw
+          hpsi_d(ig,jbnd) = hpsi_d(ig,jbnd) - exxalfa_d*RESULT_d(dfftt__nl(igk_exx_d(ig,current_k)))
+       ENDDO
+    ENDDO 
+    !
+    DEALLOCATE( RESULT_d )
+    DEALLOCATE( vc_d, fac, fac_d )
+    !
+    ! ... Localized functions to G-space and exchange matrix onto localized functions
+    ALLOCATE( RESULT2_d(npwx,NBands) )
+    RESULT2_d = (0.0d0,0.0d0)
+    !
+    DO jbnd = 1, NBands
+      !$cuf kernel do(1)
+      DO ig = 1, nrxxs
+        rhoc_d(ig) = exxbuff_d(ig,jbnd,current_jk)
+      ENDDO
+      !
+      CALL fwfft( 'Wave' , rhoc_d, dfftt )
+      !
+      !$cuf kernel do(1)
+      DO ig = 1, npw
+        RESULT2_d(ig,jbnd) = rhoc_d(dfftt__nl(igk_exx_d(ig,current_k)))
+      ENDDO
+    ENDDO
+    !
+    DEALLOCATE( rhoc_d )
+    CALL matcalc_k_gpu( 'M1-', .TRUE., 0, current_k, npwx*npol, NBands, NBands, RESULT2_d, hpsi_d, mexx_d, exxe )
+    DEALLOCATE( RESULT2_d )
+    !
+    WRITE(stdout,'(7X,2(A,I12),A,f12.2)') '  Pairs(full): ',  NBtot, &
+            '   Pairs(included): ', NBin, &
+            '   Pairs(%): ', DBLE(NBin)/DBLE(NBtot)*100.0d0
+    !
+    CALL stop_clock_gpu( 'vexxloc' )
+    !
+  END SUBROUTINE vexx_loc_k_gpu
 END MODULE exx
